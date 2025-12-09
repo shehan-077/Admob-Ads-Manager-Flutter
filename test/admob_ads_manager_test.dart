@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-// import 'package:flutter_admob_ads_manager/flutter_admob_ads_manager.dart';
-import 'package:flutter_admob_ads_manager/flutter_admob_ads_manager_platform_interface.dart';
-// import 'package:flutter_admob_ads_manager/flutter_admob_ads_manager_method_channel.dart';
+// import 'package:admob_ads_manager/admob_ads_manager.dart';
+import 'package:admob_ads_manager/admob_ads_manager_platform_interface.dart';
+// import 'package:admob_ads_manager/admob_ads_manager_method_channel.dart';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 class MockFlutterAdmobAdsManagerPlatform

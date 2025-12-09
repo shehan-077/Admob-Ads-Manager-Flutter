@@ -1,6 +1,6 @@
-name: flutter_admob_ads_manager
-description: "A new Flutter plugin project."
-version: 0.0.1
+name: admob_ads_manager
+description: "This is a flutter plugin for google admob ads. This plugin is a wrapper for google mobile ads sdk."
+version: 1.0.0
 homepage:
 
 environment:

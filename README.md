@@ -1,11 +1,11 @@
-# flutter_admob_ads_manager
+# admob_ads_manager
 
-A new Flutter plugin project.
+This is a flutter plugin for google admob ads. This plugin is a wrapper for google mobile ads sdk.
 
 ## Getting Started
 
 This project is a starting point for a Flutter
-[plug-in package](https://flutter.dev/to/develop-plugins),
+[plug-in package](https://flutter.dev/developing-packages/),
 a specialized package that includes platform-specific implementation code for
 Android and/or iOS.
 

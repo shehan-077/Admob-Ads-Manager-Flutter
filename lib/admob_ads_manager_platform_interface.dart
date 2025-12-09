@@ -1,6 +1,6 @@
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
-import 'flutter_admob_ads_manager_method_channel.dart';
+import 'admob_ads_manager_method_channel.dart';
 
 abstract class FlutterAdmobAdsManagerPlatform extends PlatformInterface {
   /// Constructs a FlutterAdmobAdsManagerPlatform.
@@ -8,7 +8,8 @@ abstract class FlutterAdmobAdsManagerPlatform extends PlatformInterface {
 
   static final Object _token = Object();
 
-  static FlutterAdmobAdsManagerPlatform _instance = MethodChannelFlutterAdmobAdsManager();
+  static FlutterAdmobAdsManagerPlatform _instance =
+      MethodChannelFlutterAdmobAdsManager();
 
   /// The default instance of [FlutterAdmobAdsManagerPlatform] to use.
   ///

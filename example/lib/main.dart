@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_admob_ads_manager/flutter_admob_ads_manager.dart';
+import 'package:admob_ads_manager/admob_ads_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
