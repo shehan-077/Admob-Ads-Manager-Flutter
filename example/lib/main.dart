@@ -17,8 +17,10 @@ void main() async {
   await AdsManager.instance.init(
     ids: ids,
     status: AdsStatus.testing,
-    loadingColor: Colors.red,
+    loadingColor: Colors.black,
   );
+
+  await AdsManager.instance.preLoad(AdsUnit.interstitial, 0);
 
   runApp(const MyApp());
 }
@@ -43,29 +45,49 @@ class HomePage extends StatelessWidget {
     AdsManager.instance.showRewarded(context, 0, _SimpleRewardHandler());
   }
 
+  void _showAppOpen(BuildContext context) {
+    AdsManager.instance.showAppOpen(context, 0, _SimpleRequestHandler());
+  }
+
+  void _showRewardInt(BuildContext context) {
+    AdsManager.instance.showRewardedInterstitial(
+      context,
+      0,
+      _SimpleRewardHandler(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Ads Manager Demo')),
-      body: Column(
-        children: [
-          ElevatedButton(
-            onPressed: () => _showInterstitial(context),
-            child: const Text('Show Interstitial'),
-          ),
-          ElevatedButton(
-            onPressed: () => _showRewarded(context),
-            child: const Text('Show Rewarded'),
-          ),
-          const Spacer(),
-          // Banner
-          const BannerAdContainer(index: 0),
-          const Spacer(),
-          // Native
-          const NativeAdsContainer(index: 0, size: NativeAdsSize.small),
-          const SizedBox(height: 10),
-          const NativeAdsContainer(index: 0, size: NativeAdsSize.medium),
-        ],
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            ElevatedButton(
+              onPressed: () => _showInterstitial(context),
+              child: const Text('Show Interstitial'),
+            ),
+            ElevatedButton(
+              onPressed: () => _showRewarded(context),
+              child: const Text('Show Rewarded'),
+            ),
+            ElevatedButton(
+              onPressed: () => _showAppOpen(context),
+              child: const Text('Show App Open'),
+            ),
+            ElevatedButton(
+              onPressed: () => _showRewardInt(context),
+              child: const Text('Show Rewarded Interstitial'),
+            ),
+            const SizedBox(height: 20),
+            const BannerAdContainer(index: 0),
+            const SizedBox(height: 20),
+            const NativeAdsContainer(index: 0, size: NativeAdsSize.small),
+            const SizedBox(height: 20),
+            const NativeAdsContainer(index: 0, size: NativeAdsSize.medium),
+          ],
+        ),
       ),
     );
   }

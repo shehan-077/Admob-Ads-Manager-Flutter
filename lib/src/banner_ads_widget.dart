@@ -6,13 +6,8 @@ import 'ads_unit.dart';
 
 class BannerAdContainer extends StatefulWidget {
   final int index;
-  final AdSize size;
 
-  const BannerAdContainer({
-    super.key,
-    required this.index,
-    this.size = AdSize.banner,
-  });
+  const BannerAdContainer({super.key, required this.index});
 
   @override
   State<BannerAdContainer> createState() => _BannerAdContainerState();
@@ -32,7 +27,7 @@ class _BannerAdContainerState extends State<BannerAdContainer> {
     final id = AdsManager.instance.getAdUnitId(AdsUnit.banner, widget.index);
     final ad = BannerAd(
       adUnitId: id,
-      size: widget.size,
+      size: AdSize.banner,
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (_) {
@@ -61,8 +56,8 @@ class _BannerAdContainerState extends State<BannerAdContainer> {
       return const SizedBox.shrink();
     }
     return SizedBox(
-      width: _banner!.size.width.toDouble(),
-      height: _banner!.size.height.toDouble(),
+      width: double.infinity,
+      height: 60.0,
       child: AdWidget(ad: _banner!),
     );
   }

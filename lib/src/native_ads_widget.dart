@@ -11,7 +11,7 @@ class NativeAdsContainer extends StatefulWidget {
   const NativeAdsContainer({
     super.key,
     required this.index,
-    this.size = NativeAdsSize.small,
+    required this.size,
   });
 
   @override
@@ -30,27 +30,39 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
 
   void _load() {
     final id = AdsManager.instance.getAdUnitId(AdsUnit.native, widget.index);
+
+    final isSmall = widget.size == NativeAdsSize.small;
+
     final ad = NativeAd(
       adUnitId: id,
       request: const AdRequest(),
       listener: NativeAdListener(
-        onAdLoaded: (_) {
-          if (mounted) {
-            setState(() {
-              _isLoaded = true;
-            });
-          }
+        onAdLoaded: (ad) {
+          if (!mounted) return;
+          setState(() => _isLoaded = true);
         },
         onAdFailedToLoad: (ad, error) {
           ad.dispose();
         },
       ),
+
       nativeTemplateStyle: NativeTemplateStyle(
-        templateType: widget.size == NativeAdsSize.small
-            ? TemplateType.small
-            : TemplateType.medium,
+        templateType: isSmall ? TemplateType.small : TemplateType.medium,
+      ),
+
+      nativeAdOptions: NativeAdOptions(
+        mediaAspectRatio: MediaAspectRatio.landscape,
+        shouldRequestMultipleImages: true,
+        videoOptions: isSmall
+            ? null
+            : VideoOptions(
+                startMuted: true,
+                clickToExpandRequested: true,
+                customControlsRequested: true,
+              ),
       ),
     );
+
     ad.load();
     _nativeAd = ad;
   }
@@ -63,14 +75,9 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_isLoaded || _nativeAd == null) {
-      return const SizedBox.shrink();
-    }
+    if (!_isLoaded || _nativeAd == null) return const SizedBox.shrink();
 
-    // Determine height based on template type
-    // Small template is typically around 90-100dp
-    // Medium template is typically around 300-350dp
-    double height = widget.size == NativeAdsSize.small ? 90.0 : 350.0;
+    final height = widget.size == NativeAdsSize.small ? 140.0 : 360.0;
 
     return SizedBox(
       width: double.infinity,

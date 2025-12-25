@@ -83,7 +83,7 @@ class AdsManager {
           case AdsUnit.banner:
             return 'ca-app-pub-3940256099942544/6300978111';
           case AdsUnit.appOpen:
-            return 'ca-app-pub-3940256099942544/3419835294';
+            return 'ca-app-pub-3940256099942544/9257395921';
           case AdsUnit.rewarded:
             return 'ca-app-pub-3940256099942544/5224354917';
           case AdsUnit.native:
@@ -96,9 +96,9 @@ class AdsManager {
           case AdsUnit.interstitial:
             return 'ca-app-pub-3940256099942544/4411468910';
           case AdsUnit.banner:
-            return 'ca-app-pub-3940256099942544/2934735716';
+            return 'ca-app-pub-3940256099942544/2435281174';
           case AdsUnit.appOpen:
-            return 'ca-app-pub-3940256099942544/5662855259';
+            return 'ca-app-pub-3940256099942544/5575463023';
           case AdsUnit.rewarded:
             return 'ca-app-pub-3940256099942544/1712485313';
           case AdsUnit.native:
@@ -111,7 +111,7 @@ class AdsManager {
 
     final ids = _ids;
     if (ids == null) {
-      throw StateError('AdsManager not initialized – call init() first.');
+      throw StateError('AdsManager not initialized. call init() first.');
     }
 
     switch (unit) {
@@ -163,6 +163,27 @@ class AdsManager {
       adLoadCallback: InterstitialAdLoadCallback(
         onAdLoaded: (ad) {
           _cache.set(AdsUnit.interstitial, index, ad);
+          if (!completer.isCompleted) completer.complete();
+        },
+        onAdFailedToLoad: (error) {
+          if (!completer.isCompleted) completer.completeError(error);
+        },
+      ),
+    );
+
+    return completer.future;
+  }
+
+  Future<void> _preloadAppOpen(int index) async {
+    final completer = Completer<void>();
+    final id = getAdUnitId(AdsUnit.appOpen, index);
+
+    await AppOpenAd.load(
+      adUnitId: id,
+      request: const AdRequest(),
+      adLoadCallback: AppOpenAdLoadCallback(
+        onAdLoaded: (ad) {
+          _cache.set(AdsUnit.appOpen, index, ad);
           if (!completer.isCompleted) completer.complete();
         },
         onAdFailedToLoad: (error) {
@@ -253,20 +274,68 @@ class AdsManager {
       return;
     }
 
-    // Note: We don't show overlay here because ad.show() is immediate
-    // and full screen.
-    // _loadingOverlay.show(context);
+    ad.fullScreenContentCallback = FullScreenContentCallback(
+      onAdShowedFullScreenContent: (_) {},
+      onAdDismissedFullScreenContent: (ad) {
+        ad.dispose();
+        _cache.remove(AdsUnit.interstitial, index);
+        handler.onSuccess();
+        AdsManager.instance.preLoad(AdsUnit.interstitial, index);
+      },
+      onAdFailedToShowFullScreenContent: (ad, error) {
+        ad.dispose();
+        _cache.remove(AdsUnit.interstitial, index);
+        handler.onError(error.message);
+      },
+    );
+
+    ad.show();
+  }
+
+  Future<void> showAppOpen(
+    BuildContext context,
+    int index,
+    RequestHandler handler,
+  ) async {
+    if (_adsDisabled) {
+      handler.onError('Ads disabled');
+      return;
+    }
+
+    AppOpenAd? ad = _cache.get<AppOpenAd>(AdsUnit.appOpen, index);
+
+    if (ad == null) {
+      _loadingOverlay.show(context);
+      try {
+        await _preloadAppOpen(index);
+        ad = _cache.get<AppOpenAd>(AdsUnit.appOpen, index);
+        _loadingOverlay.hide();
+      } catch (e) {
+        _loadingOverlay.hide();
+        handler.onError(e.toString());
+        return;
+      }
+    }
+
+    if (ad == null) {
+      handler.onError('Failed to load interstitial ad');
+      return;
+    }
+
+    if (!context.mounted) {
+      ad.dispose();
+      _cache.remove(AdsUnit.appOpen, index);
+      return;
+    }
 
     ad.fullScreenContentCallback = FullScreenContentCallback(
       onAdShowedFullScreenContent: (_) {},
       onAdDismissedFullScreenContent: (ad) {
-        // _loadingOverlay.hide();
         ad.dispose();
         _cache.remove(AdsUnit.interstitial, index);
         handler.onSuccess();
       },
       onAdFailedToShowFullScreenContent: (ad, error) {
-        // _loadingOverlay.hide();
         ad.dispose();
         _cache.remove(AdsUnit.interstitial, index);
         handler.onError(error.message);
@@ -312,20 +381,18 @@ class AdsManager {
       return;
     }
 
-    // _loadingOverlay.show(context);
-
     ad.fullScreenContentCallback = FullScreenContentCallback(
       onAdShowedFullScreenContent: (_) {
         handler.onShowed();
+        AdsManager.instance.preLoad(AdsUnit.rewarded, index);
       },
       onAdDismissedFullScreenContent: (ad) {
-        // _loadingOverlay.hide();
         ad.dispose();
         _cache.remove(AdsUnit.rewarded, index);
         handler.onDismissed();
+        AdsManager.instance.preLoad(AdsUnit.rewarded, index);
       },
       onAdFailedToShowFullScreenContent: (ad, error) {
-        // _loadingOverlay.hide();
         ad.dispose();
         _cache.remove(AdsUnit.rewarded, index);
         handler.onFailedToShow(error.message);
@@ -378,20 +445,18 @@ class AdsManager {
       return;
     }
 
-    // _loadingOverlay.show(context);
-
     ad.fullScreenContentCallback = FullScreenContentCallback(
       onAdShowedFullScreenContent: (_) {
         handler.onShowed();
+        AdsManager.instance.preLoad(AdsUnit.rewardedInt, index);
       },
       onAdDismissedFullScreenContent: (ad) {
-        // _loadingOverlay.hide();
         ad.dispose();
         _cache.remove(AdsUnit.rewardedInt, index);
         handler.onDismissed();
+        AdsManager.instance.preLoad(AdsUnit.rewardedInt, index);
       },
       onAdFailedToShowFullScreenContent: (ad, error) {
-        // _loadingOverlay.hide();
         ad.dispose();
         _cache.remove(AdsUnit.rewardedInt, index);
         handler.onFailedToShow(error.message);
