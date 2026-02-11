@@ -15,7 +15,12 @@ class AdMobIds {
     required this.rewardedIds,
     required this.nativeIds,
     required this.rewardedIntIds,
-  });
+  }) : assert(interstitialIds.length > 0),
+       assert(bannerIds.length > 0),
+       assert(appOpenIds.length > 0),
+       assert(rewardedIds.length > 0),
+       assert(nativeIds.length > 0),
+       assert(rewardedIntIds.length > 0);
 
   factory AdMobIds.single({
     required String appId,
@@ -36,4 +41,18 @@ class AdMobIds {
       rewardedIntIds: [rewardedIntId],
     );
   }
+
+  String getInterstitial(int index) =>
+      interstitialIds[index % interstitialIds.length];
+
+  String getBanner(int index) => bannerIds[index % bannerIds.length];
+
+  String getAppOpen(int index) => appOpenIds[index % appOpenIds.length];
+
+  String getRewarded(int index) => rewardedIds[index % rewardedIds.length];
+
+  String getNative(int index) => nativeIds[index % nativeIds.length];
+
+  String getRewardedInterstitial(int index) =>
+      rewardedIntIds[index % rewardedIntIds.length];
 }

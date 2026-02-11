@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 class LoadingOverlay {
   Color? _tintColor;
+  OverlayEntry? _currentEntry;
 
   void setColor(Color color) {
     _tintColor = color;
@@ -9,26 +10,39 @@ class LoadingOverlay {
 
   OverlayEntry _buildEntry() {
     return OverlayEntry(
-      builder: (context) {
-        return ColoredBox(
-          color: (_tintColor ?? Colors.black54).withValues(alpha: 0.6),
-          child: const Center(child: CircularProgressIndicator()),
+      builder: (_) {
+        return AbsorbPointer(
+          absorbing: true,
+          child: ColoredBox(
+            color: (_tintColor ?? Colors.black54).withOpacity(0.6),
+            child: const Center(child: CircularProgressIndicator()),
+          ),
         );
       },
     );
   }
 
-  OverlayEntry? _currentEntry;
-
   void show(BuildContext context) {
     if (_currentEntry != null) return;
-    final overlay = Overlay.of(context);
+
+    final overlay = Overlay.of(context, rootOverlay: true);
+    if (overlay == null) return;
+
     _currentEntry = _buildEntry();
     overlay.insert(_currentEntry!);
   }
 
   void hide() {
-    _currentEntry?.remove();
+    final entry = _currentEntry;
     _currentEntry = null;
+    if (entry == null) return;
+
+    try {
+      entry.remove();
+    } catch (_) {
+      // ignore: already removed / route disposed
+    }
   }
+
+  bool get isShowing => _currentEntry != null;
 }

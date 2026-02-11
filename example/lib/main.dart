@@ -38,22 +38,53 @@ class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
   void _showInterstitial(BuildContext context) {
-    AdsManager.instance.showInterstitial(context, 0, _SimpleRequestHandler());
+    AdsManager.instance.showInterstitial(
+      context,
+      0,
+      RequestHandlerImpl(
+        onSuccess: () => debugPrint('Interstitial success / dismissed'),
+        onError: (e) => debugPrint('Interstitial error: $e'),
+      ),
+    );
   }
 
   void _showRewarded(BuildContext context) {
-    AdsManager.instance.showRewarded(context, 0, _SimpleRewardHandler());
+    AdsManager.instance.showRewarded(
+      context,
+      0,
+      RewardedCallbacks(
+        onShowed: () => debugPrint('Reward showed'),
+        onRewarded: () => debugPrint('User rewarded!'),
+        onDismissed: () => debugPrint('Reward dismissed'),
+        onError: (e) => debugPrint('Reward error: $e'),
+        onFailedToShow: (e) => debugPrint('Reward failed to show: $e'),
+      ),
+    );
   }
 
   void _showAppOpen(BuildContext context) {
-    AdsManager.instance.showAppOpen(context, 0, _SimpleRequestHandler());
+    AdsManager.instance.showAppOpen(
+      context,
+      0,
+      RequestHandlerImpl(
+        onSuccess: () => debugPrint('App Open success / dismissed'),
+        onError: (e) => debugPrint('App Open error: $e'),
+      ),
+    );
   }
 
   void _showRewardInt(BuildContext context) {
     AdsManager.instance.showRewardedInterstitial(
       context,
       0,
-      _SimpleRewardHandler(),
+      RewardedCallbacks(
+        onShowed: () => debugPrint('Rewarded Interstitial showed'),
+        onRewarded: () => debugPrint('User rewarded from interstitial!'),
+        onDismissed: () => debugPrint('Rewarded Interstitial dismissed'),
+        onError: (e) => debugPrint('Rewarded Interstitial error: $e'),
+        onFailedToShow: (e) =>
+            debugPrint('Rewarded Interstitial failed to show: $e'),
+      ),
     );
   }
 
@@ -90,44 +121,5 @@ class HomePage extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class _SimpleRequestHandler implements RequestHandler {
-  @override
-  void onError(String error) {
-    debugPrint('Interstitial error: $error');
-  }
-
-  @override
-  void onSuccess() {
-    debugPrint('Interstitial success / dismissed');
-  }
-}
-
-class _SimpleRewardHandler implements RewardedRequestHandler {
-  @override
-  void onDismissed() {
-    debugPrint('Reward dismissed');
-  }
-
-  @override
-  void onError(String error) {
-    debugPrint('Reward error: $error');
-  }
-
-  @override
-  void onFailedToShow(String error) {
-    debugPrint('Reward failed to show: $error');
-  }
-
-  @override
-  void onRewarded() {
-    debugPrint('User rewarded!');
-  }
-
-  @override
-  void onShowed() {
-    debugPrint('Reward showed');
   }
 }

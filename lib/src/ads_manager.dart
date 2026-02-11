@@ -14,10 +14,8 @@ import 'request_handler.dart';
 
 class AdsManager {
   static final AdsManager _instance = AdsManager._internal();
-
   factory AdsManager() => _instance;
   static AdsManager get instance => _instance;
-
   AdsManager._internal();
 
   AdMobIds? _ids;
@@ -28,6 +26,8 @@ class AdsManager {
   final LoadingOverlay _loadingOverlay = LoadingOverlay();
 
   bool _initialized = false;
+
+  final Map<String, Future<void>> _loadingTasks = {};
 
   Future<void> init({
     required AdMobIds ids,
@@ -47,34 +47,32 @@ class AdsManager {
     }
   }
 
-  void setForceTestAds(bool force) {
-    _forceTestAds = force;
-  }
+  void setForceTestAds(bool force) => _forceTestAds = force;
 
-  void setLoadingColor(Color color) {
-    _loadingOverlay.setColor(color);
-  }
+  void setLoadingColor(Color color) => _loadingOverlay.setColor(color);
 
   AdsStatus _effectiveStatus() {
     if (_status == AdsStatus.hybrid) {
-      final debug = kDebugMode;
-      return (debug || _forceTestAds) ? AdsStatus.testing : AdsStatus.enabled;
+      return (kDebugMode || _forceTestAds)
+          ? AdsStatus.testing
+          : AdsStatus.enabled;
     }
     return _status;
   }
 
+  bool get _adsDisabled => _effectiveStatus() == AdsStatus.disabled;
+
   String _pickId(List<String> ids, int index) {
     if (ids.isEmpty) {
-      throw StateError('No AdMob IDs configured for this type');
+      throw StateError('No AdMob IDs configured for this ad type');
     }
-    if (index < 0 || index >= ids.length) {
-      index = 0;
-    }
-    return ids[index];
+    final safeIndex = index.abs() % ids.length;
+    return ids[safeIndex];
   }
 
   String getAdUnitId(AdsUnit unit, int index) {
     final effective = _effectiveStatus();
+
     if (effective == AdsStatus.testing) {
       if (Platform.isAndroid) {
         switch (unit) {
@@ -111,7 +109,7 @@ class AdsManager {
 
     final ids = _ids;
     if (ids == null) {
-      throw StateError('AdsManager not initialized. call init() first.');
+      throw StateError('AdsManager not initialized. Call init() first.');
     }
 
     switch (unit) {
@@ -130,34 +128,52 @@ class AdsManager {
     }
   }
 
-  bool get _adsDisabled => _effectiveStatus() == AdsStatus.disabled;
+  String _taskKey(AdsUnit unit, int index) => '${unit.name}#$index';
 
   Future<void> preLoad(AdsUnit unit, int index) async {
     if (_adsDisabled) return;
 
     switch (unit) {
       case AdsUnit.interstitial:
-        await _preloadInterstitial(index);
-        break;
+        return _runSingleLoad(unit, index, () => _preloadInterstitial(index));
       case AdsUnit.rewarded:
-        await _preloadRewarded(index);
-        break;
+        return _runSingleLoad(unit, index, () => _preloadRewarded(index));
       case AdsUnit.rewardedInt:
-        await _preloadRewardedInterstitial(index);
-        break;
+        return _runSingleLoad(
+          unit,
+          index,
+          () => _preloadRewardedInterstitial(index),
+        );
       case AdsUnit.appOpen:
-        break;
+        return _runSingleLoad(unit, index, () => _preloadAppOpen(index));
       case AdsUnit.banner:
       case AdsUnit.native:
-        break;
+        return;
     }
+  }
+
+  Future<void> _runSingleLoad(
+    AdsUnit unit,
+    int index,
+    Future<void> Function() loader,
+  ) {
+    final key = _taskKey(unit, index);
+    final existing = _loadingTasks[key];
+    if (existing != null) return existing;
+
+    final future = loader().whenComplete(() {
+      _loadingTasks.remove(key);
+    });
+
+    _loadingTasks[key] = future;
+    return future;
   }
 
   Future<void> _preloadInterstitial(int index) async {
     final completer = Completer<void>();
     final id = getAdUnitId(AdsUnit.interstitial, index);
 
-    await InterstitialAd.load(
+    InterstitialAd.load(
       adUnitId: id,
       request: const AdRequest(),
       adLoadCallback: InterstitialAdLoadCallback(
@@ -178,7 +194,7 @@ class AdsManager {
     final completer = Completer<void>();
     final id = getAdUnitId(AdsUnit.appOpen, index);
 
-    await AppOpenAd.load(
+    AppOpenAd.load(
       adUnitId: id,
       request: const AdRequest(),
       adLoadCallback: AppOpenAdLoadCallback(
@@ -199,7 +215,7 @@ class AdsManager {
     final completer = Completer<void>();
     final id = getAdUnitId(AdsUnit.rewarded, index);
 
-    await RewardedAd.load(
+    RewardedAd.load(
       adUnitId: id,
       request: const AdRequest(),
       rewardedAdLoadCallback: RewardedAdLoadCallback(
@@ -212,6 +228,7 @@ class AdsManager {
         },
       ),
     );
+
     return completer.future;
   }
 
@@ -219,7 +236,7 @@ class AdsManager {
     final completer = Completer<void>();
     final id = getAdUnitId(AdsUnit.rewardedInt, index);
 
-    await RewardedInterstitialAd.load(
+    RewardedInterstitialAd.load(
       adUnitId: id,
       request: const AdRequest(),
       rewardedInterstitialAdLoadCallback: RewardedInterstitialAdLoadCallback(
@@ -232,6 +249,7 @@ class AdsManager {
         },
       ),
     );
+
     return completer.future;
   }
 
@@ -241,7 +259,7 @@ class AdsManager {
     RequestHandler handler,
   ) async {
     if (_adsDisabled) {
-      handler.onError('Ads disabled');
+      handler.onSuccess();
       return;
     }
 
@@ -253,13 +271,12 @@ class AdsManager {
     if (ad == null) {
       _loadingOverlay.show(context);
       try {
-        await _preloadInterstitial(index);
+        await preLoad(AdsUnit.interstitial, index);
         ad = _cache.get<InterstitialAd>(AdsUnit.interstitial, index);
-        _loadingOverlay.hide();
       } catch (e) {
-        _loadingOverlay.hide();
         handler.onError(e.toString());
-        return;
+      } finally {
+        _loadingOverlay.hide();
       }
     }
 
@@ -275,17 +292,17 @@ class AdsManager {
     }
 
     ad.fullScreenContentCallback = FullScreenContentCallback(
-      onAdShowedFullScreenContent: (_) {},
       onAdDismissedFullScreenContent: (ad) {
         ad.dispose();
         _cache.remove(AdsUnit.interstitial, index);
         handler.onSuccess();
-        AdsManager.instance.preLoad(AdsUnit.interstitial, index);
+        preLoad(AdsUnit.interstitial, index);
       },
       onAdFailedToShowFullScreenContent: (ad, error) {
         ad.dispose();
         _cache.remove(AdsUnit.interstitial, index);
-        handler.onError(error.message);
+        handler.onError(error.toString());
+        preLoad(AdsUnit.interstitial, index);
       },
     );
 
@@ -298,7 +315,7 @@ class AdsManager {
     RequestHandler handler,
   ) async {
     if (_adsDisabled) {
-      handler.onError('Ads disabled');
+      handler.onSuccess();
       return;
     }
 
@@ -307,18 +324,17 @@ class AdsManager {
     if (ad == null) {
       _loadingOverlay.show(context);
       try {
-        await _preloadAppOpen(index);
+        await preLoad(AdsUnit.appOpen, index);
         ad = _cache.get<AppOpenAd>(AdsUnit.appOpen, index);
-        _loadingOverlay.hide();
       } catch (e) {
-        _loadingOverlay.hide();
         handler.onError(e.toString());
-        return;
+      } finally {
+        _loadingOverlay.hide();
       }
     }
 
     if (ad == null) {
-      handler.onError('Failed to load interstitial ad');
+      handler.onError('Failed to load app open ad');
       return;
     }
 
@@ -329,16 +345,17 @@ class AdsManager {
     }
 
     ad.fullScreenContentCallback = FullScreenContentCallback(
-      onAdShowedFullScreenContent: (_) {},
       onAdDismissedFullScreenContent: (ad) {
         ad.dispose();
-        _cache.remove(AdsUnit.interstitial, index);
+        _cache.remove(AdsUnit.appOpen, index);
         handler.onSuccess();
+        preLoad(AdsUnit.appOpen, index);
       },
       onAdFailedToShowFullScreenContent: (ad, error) {
         ad.dispose();
-        _cache.remove(AdsUnit.interstitial, index);
-        handler.onError(error.message);
+        _cache.remove(AdsUnit.appOpen, index);
+        handler.onError(error.toString());
+        preLoad(AdsUnit.appOpen, index);
       },
     );
 
@@ -348,10 +365,10 @@ class AdsManager {
   Future<void> showRewarded(
     BuildContext context,
     int index,
-    RewardedRequestHandler handler,
+    RewardedCallbacks handler,
   ) async {
     if (_adsDisabled) {
-      handler.onError('Ads disabled');
+      handler.onDismissed?.call();
       return;
     }
 
@@ -360,18 +377,17 @@ class AdsManager {
     if (ad == null) {
       _loadingOverlay.show(context);
       try {
-        await _preloadRewarded(index);
+        await preLoad(AdsUnit.rewarded, index);
         ad = _cache.get<RewardedAd>(AdsUnit.rewarded, index);
-        _loadingOverlay.hide();
       } catch (e) {
+        handler.onError?.call(e);
+      } finally {
         _loadingOverlay.hide();
-        handler.onError(e.toString());
-        return;
       }
     }
 
     if (ad == null) {
-      handler.onError('Failed to load rewarded ad');
+      handler.onError?.call('Failed to load rewarded ad');
       return;
     }
 
@@ -383,25 +399,25 @@ class AdsManager {
 
     ad.fullScreenContentCallback = FullScreenContentCallback(
       onAdShowedFullScreenContent: (_) {
-        handler.onShowed();
-        AdsManager.instance.preLoad(AdsUnit.rewarded, index);
+        handler.onShowed?.call();
       },
       onAdDismissedFullScreenContent: (ad) {
         ad.dispose();
         _cache.remove(AdsUnit.rewarded, index);
-        handler.onDismissed();
-        AdsManager.instance.preLoad(AdsUnit.rewarded, index);
+        handler.onDismissed?.call();
+        preLoad(AdsUnit.rewarded, index);
       },
       onAdFailedToShowFullScreenContent: (ad, error) {
         ad.dispose();
         _cache.remove(AdsUnit.rewarded, index);
-        handler.onFailedToShow(error.message);
+        handler.onFailedToShow?.call(error);
+        preLoad(AdsUnit.rewarded, index);
       },
     );
 
     ad.show(
       onUserEarnedReward: (ad, reward) {
-        handler.onRewarded();
+        handler.onRewarded?.call();
       },
     );
   }
@@ -409,10 +425,10 @@ class AdsManager {
   Future<void> showRewardedInterstitial(
     BuildContext context,
     int index,
-    RewardedRequestHandler handler,
+    RewardedCallbacks handler,
   ) async {
     if (_adsDisabled) {
-      handler.onError('Ads disabled');
+      handler.onDismissed?.call();
       return;
     }
 
@@ -424,18 +440,17 @@ class AdsManager {
     if (ad == null) {
       _loadingOverlay.show(context);
       try {
-        await _preloadRewardedInterstitial(index);
+        await preLoad(AdsUnit.rewardedInt, index);
         ad = _cache.get<RewardedInterstitialAd>(AdsUnit.rewardedInt, index);
-        _loadingOverlay.hide();
       } catch (e) {
+        handler.onError?.call(e.toString());
+      } finally {
         _loadingOverlay.hide();
-        handler.onError(e.toString());
-        return;
       }
     }
 
     if (ad == null) {
-      handler.onError('Failed to load rewarded interstitial ad');
+      handler.onError?.call('Failed to load rewarded interstitial ad');
       return;
     }
 
@@ -447,25 +462,25 @@ class AdsManager {
 
     ad.fullScreenContentCallback = FullScreenContentCallback(
       onAdShowedFullScreenContent: (_) {
-        handler.onShowed();
-        AdsManager.instance.preLoad(AdsUnit.rewardedInt, index);
+        handler.onShowed?.call();
       },
       onAdDismissedFullScreenContent: (ad) {
         ad.dispose();
         _cache.remove(AdsUnit.rewardedInt, index);
-        handler.onDismissed();
-        AdsManager.instance.preLoad(AdsUnit.rewardedInt, index);
+        handler.onDismissed?.call();
+        preLoad(AdsUnit.rewardedInt, index);
       },
       onAdFailedToShowFullScreenContent: (ad, error) {
         ad.dispose();
         _cache.remove(AdsUnit.rewardedInt, index);
-        handler.onFailedToShow(error.message);
+        handler.onFailedToShow?.call(error.toString());
+        preLoad(AdsUnit.rewardedInt, index);
       },
     );
 
     ad.show(
       onUserEarnedReward: (ad, reward) {
-        handler.onRewarded();
+        handler.onRewarded?.call();
       },
     );
   }

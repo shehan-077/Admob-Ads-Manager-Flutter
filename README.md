@@ -35,7 +35,7 @@ dependencies:
   flutter_admob_ads_manager:
     git:
       url: https://github.com/your-org/flutter_admob_ads_manager.git
-      ref: 1.0.0
+      ref: 1.0.1
 ```
 
 ---
@@ -126,103 +126,60 @@ await AdsManager.instance.preLoad(AdsUnit.rewardInt, 0);
 ### App Open Ad
 
 ```dart
-AdsManager.instance.showAppOpen(context, 0, _SimpleRequestHandler());
-
-class _SimpleRequestHandler implements RequestHandler {
-  @override
-  void onError(String error) {
-    debugPrint('App Open error: $error');
-  }
-
-  @override
-  void onSuccess() {
-    debugPrint('App Open success / dismissed');
-  }
-}
+AdsManager.instance.showAppOpen(
+      context,
+      0,
+      RequestHandlerImpl(
+        onSuccess: () => debugPrint('App Open success / dismissed'),
+        onError: (e) => debugPrint('App Open error: $e'),
+      ),
+    );
 ```
 
 ### Interstitial Ad
 
 ```dart
-AdsManager.instance.showInterstitial(context, 0, _SimpleRequestHandler());
-
-class _SimpleRequestHandler implements RequestHandler {
-  @override
-  void onError(String error) {
-    debugPrint('Interstitial error: $error');
-  }
-
-  @override
-  void onSuccess() {
-    debugPrint('Interstitial success / dismissed');
-  }
-}
+AdsManager.instance.showInterstitial(
+      context,
+      0,
+      RequestHandlerImpl(
+        onSuccess: () => debugPrint('Interstitial success / dismissed'),
+        onError: (e) => debugPrint('Interstitial error: $e'),
+      ),
+    );
 ```
 
 ### Rewarded Ad
 
 ```dart
-AdsManager.instance.showRewarded(context, 0, _SimpleRewardHandler());
-
-class _SimpleRewardHandler implements RewardedRequestHandler {
-  @override
-  void onDismissed() {
-    debugPrint('Reward dismissed');
-  }
-
-  @override
-  void onError(String error) {
-    debugPrint('Reward error: $error');
-  }
-
-  @override
-  void onFailedToShow(String error) {
-    debugPrint('Reward failed to show: $error');
-  }
-
-  @override
-  void onRewarded() {
-    debugPrint('User rewarded!');
-  }
-
-  @override
-  void onShowed() {
-    debugPrint('Reward showed');
-  }
-}
+AdsManager.instance.showRewarded(
+      context,
+      0,
+      RewardedCallbacks(
+        onShowed: () => debugPrint('Reward showed'),
+        onRewarded: () => debugPrint('User rewarded!'),
+        onDismissed: () => debugPrint('Reward dismissed'),
+        onError: (e) => debugPrint('Reward error: $e'),
+        onFailedToShow: (e) => debugPrint('Reward failed to show: $e'),
+      ),
+    );
 ```
 
 ### Rewarded Interstitial Ad
 
 ```dart
-AdsManager.instance.showRewardedInterstitial(context, 0, _SimpleRewardHandler());
-
-class _SimpleRewardHandler implements RewardedRequestHandler {
-  @override
-  void onDismissed() {
-    debugPrint('Reward Int dismissed');
-  }
-
-  @override
-  void onError(String error) {
-    debugPrint('Reward Int error: $error');
-  }
-
-  @override
-  void onFailedToShow(String error) {
-    debugPrint('Reward Int failed to show: $error');
-  }
-
-  @override
-  void onRewarded() {
-    debugPrint('User rewarded!');
-  }
-
-  @override
-  void onShowed() {
-    debugPrint('Reward Int showed');
-  }
-}
+AdsManager.instance.showRewardedInterstitial(
+      context,
+      0,
+      RewardedCallbacks(
+        onShowed: () => debugPrint('Rewarded Interstitial showed'),
+        onRewarded: () => debugPrint('User rewarded from interstitial!'),
+        onDismissed: () => debugPrint('Rewarded Interstitial dismissed'),
+        onError: (e) => debugPrint('Rewarded Interstitial error: $e'),
+        onFailedToShow: (e) =>
+            debugPrint('Rewarded Interstitial failed to show: $e'),
+      ),
+    );
 ```
 
 ### Banner Ad

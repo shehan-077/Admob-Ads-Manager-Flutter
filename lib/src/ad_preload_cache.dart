@@ -8,14 +8,10 @@ class _AdKey {
 
   @override
   bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is _AdKey &&
-          runtimeType == other.runtimeType &&
-          unit == other.unit &&
-          index == other.index;
+      other is _AdKey && unit == other.unit && index == other.index;
 
   @override
-  int get hashCode => unit.hashCode ^ index.hashCode;
+  int get hashCode => Object.hash(unit, index);
 }
 
 class AdPreloadCache {
@@ -23,13 +19,15 @@ class AdPreloadCache {
 
   T? get<T>(AdsUnit unit, int index) {
     final obj = _cache[_AdKey(unit, index)];
-    if (obj is T) return obj;
-    return null;
+    return obj is T ? obj : null;
   }
 
   void set(AdsUnit unit, int index, Object ad) {
     _cache[_AdKey(unit, index)] = ad;
   }
+
+  bool contains(AdsUnit unit, int index) =>
+      _cache.containsKey(_AdKey(unit, index));
 
   void remove(AdsUnit unit, int index) {
     _cache.remove(_AdKey(unit, index));

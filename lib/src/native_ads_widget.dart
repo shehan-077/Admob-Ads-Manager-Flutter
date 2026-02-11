@@ -21,6 +21,7 @@ class NativeAdsContainer extends StatefulWidget {
 class _NativeAdsContainerState extends State<NativeAdsContainer> {
   NativeAd? _nativeAd;
   bool _isLoaded = false;
+  bool _isLoading = false;
 
   @override
   void initState() {
@@ -28,9 +29,27 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
     _load();
   }
 
-  void _load() {
-    final id = AdsManager.instance.getAdUnitId(AdsUnit.native, widget.index);
+  @override
+  void didUpdateWidget(covariant NativeAdsContainer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.index != widget.index || oldWidget.size != widget.size) {
+      _disposeAd();
+      _load();
+    }
+  }
 
+  void _disposeAd() {
+    _nativeAd?.dispose();
+    _nativeAd = null;
+    _isLoaded = false;
+    _isLoading = false;
+  }
+
+  void _load() {
+    if (_isLoading) return;
+    _isLoading = true;
+
+    final id = AdsManager.instance.getAdUnitId(AdsUnit.native, widget.index);
     final isSmall = widget.size == NativeAdsSize.small;
 
     final ad = NativeAd(
@@ -39,17 +58,25 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
       listener: NativeAdListener(
         onAdLoaded: (ad) {
           if (!mounted) return;
-          setState(() => _isLoaded = true);
+          setState(() {
+            _isLoaded = true;
+          });
         },
         onAdFailedToLoad: (ad, error) {
+          debugPrint('Native failed: $error');
           ad.dispose();
+          if (!mounted) return;
+          setState(() {
+            // ensure we don't keep a disposed ad
+            if (_nativeAd == ad) _nativeAd = null;
+            _isLoaded = false;
+          });
+          _isLoading = false;
         },
       ),
-
       nativeTemplateStyle: NativeTemplateStyle(
         templateType: isSmall ? TemplateType.small : TemplateType.medium,
       ),
-
       nativeAdOptions: NativeAdOptions(
         mediaAspectRatio: MediaAspectRatio.landscape,
         shouldRequestMultipleImages: true,
@@ -63,13 +90,18 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
       ),
     );
 
+    setState(() {
+      _nativeAd = ad;
+      _isLoaded = false;
+    });
+
     ad.load();
-    _nativeAd = ad;
+    _isLoading = false;
   }
 
   @override
   void dispose() {
-    _nativeAd?.dispose();
+    _disposeAd();
     super.dispose();
   }
 
