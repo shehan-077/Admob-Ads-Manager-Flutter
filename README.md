@@ -32,10 +32,10 @@ Add the following to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  flutter_admob_ads_manager:
+    admob_ads_manager:
     git:
       url: https://github.com/shehan-077/Admob-Ads-Manager-Flutter.git
-      ref: 1.0.1
+      ref: 1.0.2
 ```
 
 ---
@@ -89,10 +89,10 @@ dependencies:
 await AdsManager.instance.preLoad(AdsUnit.interstitial, 0);
 
 // Pre-load Rewarded Ad at index 0
-await AdsManager.instance.preLoad(AdsUnit.reward, 0);
+await AdsManager.instance.preLoad(AdsUnit.rewarded, 0);
 
 // Pre-load Rewarded Interstitial Ad at index 0
-await AdsManager.instance.preLoad(AdsUnit.rewardInt, 0);
+await AdsManager.instance.preLoad(AdsUnit.rewardedInt, 0);
 ```
 
 ---

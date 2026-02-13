@@ -42,6 +42,7 @@ class _BannerAdContainerState extends State<BannerAdContainer> {
 
   Future<void> _load() async {
     if (_isLoading) return;
+    if (AdsManager.instance.isDisabled) return;
     _isLoading = true;
 
     final size = MediaQuery.sizeOf(context);
@@ -92,6 +93,7 @@ class _BannerAdContainerState extends State<BannerAdContainer> {
 
   @override
   Widget build(BuildContext context) {
+    if (AdsManager.instance.isDisabled) return const SizedBox.shrink();
     if (!_isLoaded || _banner == null || _adSize == null) {
       return const SizedBox.shrink();
     }

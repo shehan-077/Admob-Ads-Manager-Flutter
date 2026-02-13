@@ -47,6 +47,7 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
 
   void _load() {
     if (_isLoading) return;
+    if (AdsManager.instance.isDisabled) return;
     _isLoading = true;
 
     final id = AdsManager.instance.getAdUnitId(AdsUnit.native, widget.index);
@@ -107,6 +108,7 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
 
   @override
   Widget build(BuildContext context) {
+    if (AdsManager.instance.isDisabled) return const SizedBox.shrink();
     if (!_isLoaded || _nativeAd == null) return const SizedBox.shrink();
 
     final height = widget.size == NativeAdsSize.small ? 140.0 : 360.0;

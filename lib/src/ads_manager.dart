@@ -41,7 +41,7 @@ class AdsManager {
       _loadingOverlay.setColor(loadingColor);
     }
 
-    if (!_initialized) {
+    if (!_initialized && !isDisabled) {
       await MobileAds.instance.initialize();
       _initialized = true;
     }
@@ -60,7 +60,9 @@ class AdsManager {
     return _status;
   }
 
-  bool get _adsDisabled => _effectiveStatus() == AdsStatus.disabled;
+  bool get isDisabled => _effectiveStatus() == AdsStatus.disabled;
+
+  bool get _adsDisabled => isDisabled;
 
   String _pickId(List<String> ids, int index) {
     if (ids.isEmpty) {

@@ -1,26 +1,32 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:admob_ads_manager/admob_ads_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  final ids = AdMobIds.single(
-    appId: "appId",
-    interstitialId: "interstitialId",
-    bannerId: "bannerId",
-    appOpenId: "appOpenId",
-    rewardedId: "rewardedId",
-    nativeId: "nativeId",
-    rewardedIntId: "rewardedIntId",
-  );
+  if (Platform.isAndroid) {
+    final ids = AdMobIds.single(
+      appId: "appId",
+      interstitialId: "interstitialId",
+      bannerId: "bannerId",
+      appOpenId: "appOpenId",
+      rewardedId: "rewardedId",
+      nativeId: "nativeId",
+      rewardedIntId: "rewardedIntId",
+    );
 
-  await AdsManager.instance.init(
-    ids: ids,
-    status: AdsStatus.testing,
-    loadingColor: Colors.black,
-  );
+    await AdsManager.instance.init(
+      ids: ids,
+      status: AdsStatus.testing,
+      loadingColor: Colors.black,
+    );
 
-  await AdsManager.instance.preLoad(AdsUnit.interstitial, 0);
+    await AdsManager.instance.preLoad(AdsUnit.interstitial, 0);
+    await AdsManager.instance.preLoad(AdsUnit.rewarded, 0);
+    await AdsManager.instance.preLoad(AdsUnit.rewardedInt, 0);
+  }
 
   runApp(const MyApp());
 }
