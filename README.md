@@ -35,7 +35,7 @@ dependencies:
     admob_ads_manager:
     git:
       url: https://github.com/shehan-077/Admob-Ads-Manager-Flutter.git
-      ref: 1.0.2
+      ref: 1.0.3
 ```
 
 ---
@@ -64,6 +64,19 @@ dependencies:
 - `nativeId`: native ad unit id
 - `rewardedIntId`: reward interstitial ad unit id
 
+### With Multiple Ad Unit ID
+
+```dart
+  final ids = AdMobIds(
+    appId: 'appId',
+    interstitialId: ['interstitialId_1', 'interstitialId_2'],
+    bannerId: ['bannerId_1', 'bannerId_2'],
+    appOpenId: ['appOpenId_1', 'appOpenId_2'],
+    rewardedId: ['rewardedId_1', 'rewardedId_2'],
+    nativeId: ['nativeId'],
+    rewardedIntId: ['rewardedIntId'],
+  );
+```
 ---
 
 ## 🧠 2. Initialize AdsManager
