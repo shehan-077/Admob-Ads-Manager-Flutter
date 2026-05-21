@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 typedef ErrorCallback = void Function(Object error);
+typedef RewardEarnedCallback = void Function(RewardItem reward);
 
 abstract class RequestHandler {
   void onSuccess() {}
@@ -27,10 +29,11 @@ class RequestHandlerImpl extends RequestHandler {
 class RewardedCallbacks {
   final VoidCallback? onLoaded;
   final VoidCallback? onShowed;
-  final VoidCallback? onRewarded;
+  final RewardEarnedCallback? onRewarded;
   final VoidCallback? onDismissed;
   final ErrorCallback? onError;
   final ErrorCallback? onFailedToShow;
+  final ErrorCallback? onFailedToLoad;
 
   const RewardedCallbacks({
     this.onLoaded,
@@ -39,13 +42,14 @@ class RewardedCallbacks {
     this.onDismissed,
     this.onError,
     this.onFailedToShow,
+    this.onFailedToLoad,
   });
 }
 
 class RewardedHandlerBuilder {
   VoidCallback? _onLoaded;
   VoidCallback? _onShowed;
-  VoidCallback? _onRewarded;
+  RewardEarnedCallback? _onRewarded;
   VoidCallback? _onDismissed;
   ErrorCallback? _onError;
   ErrorCallback? _onFailedToShow;
@@ -60,7 +64,7 @@ class RewardedHandlerBuilder {
     return this;
   }
 
-  RewardedHandlerBuilder onRewarded(VoidCallback cb) {
+  RewardedHandlerBuilder onRewarded(RewardEarnedCallback cb) {
     _onRewarded = cb;
     return this;
   }

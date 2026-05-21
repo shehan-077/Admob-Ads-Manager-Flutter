@@ -21,12 +21,10 @@ class AdsManager {
   AdMobIds? _ids;
   AdsStatus _status = AdsStatus.enabled;
   bool _forceTestAds = false;
+  bool _initialized = false;
 
   final AdPreloadCache _cache = AdPreloadCache();
   final LoadingOverlay _loadingOverlay = LoadingOverlay();
-
-  bool _initialized = false;
-
   final Map<String, Future<void>> _loadingTasks = {};
 
   Future<void> init({
@@ -48,7 +46,6 @@ class AdsManager {
   }
 
   void setForceTestAds(bool force) => _forceTestAds = force;
-
   void setLoadingColor(Color color) => _loadingOverlay.setColor(color);
 
   AdsStatus _effectiveStatus() {
@@ -419,7 +416,7 @@ class AdsManager {
 
     ad.show(
       onUserEarnedReward: (ad, reward) {
-        handler.onRewarded?.call();
+        handler.onRewarded?.call(reward);
       },
     );
   }
@@ -482,7 +479,7 @@ class AdsManager {
 
     ad.show(
       onUserEarnedReward: (ad, reward) {
-        handler.onRewarded?.call();
+        handler.onRewarded?.call(reward);
       },
     );
   }

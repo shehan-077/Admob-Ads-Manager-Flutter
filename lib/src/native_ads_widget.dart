@@ -32,6 +32,7 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
   @override
   void didUpdateWidget(covariant NativeAdsContainer oldWidget) {
     super.didUpdateWidget(oldWidget);
+
     if (oldWidget.index != widget.index || oldWidget.size != widget.size) {
       _disposeAd();
       _load();
@@ -58,21 +59,27 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
       request: const AdRequest(),
       listener: NativeAdListener(
         onAdLoaded: (ad) {
-          if (!mounted) return;
+          if (!mounted) {
+            ad.dispose();
+            return;
+          }
+
           setState(() {
+            _nativeAd = ad as NativeAd;
             _isLoaded = true;
+            _isLoading = false;
           });
         },
         onAdFailedToLoad: (ad, error) {
           debugPrint('Native failed: $error');
           ad.dispose();
           if (!mounted) return;
+
           setState(() {
-            // ensure we don't keep a disposed ad
-            if (_nativeAd == ad) _nativeAd = null;
+            _nativeAd = null;
             _isLoaded = false;
+            _isLoading = false;
           });
-          _isLoading = false;
         },
       ),
       nativeTemplateStyle: NativeTemplateStyle(
@@ -91,13 +98,7 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
       ),
     );
 
-    setState(() {
-      _nativeAd = ad;
-      _isLoaded = false;
-    });
-
     ad.load();
-    _isLoading = false;
   }
 
   @override
@@ -111,7 +112,7 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
     if (AdsManager.instance.isDisabled) return const SizedBox.shrink();
     if (!_isLoaded || _nativeAd == null) return const SizedBox.shrink();
 
-    final height = widget.size == NativeAdsSize.small ? 140.0 : 360.0;
+    final height = widget.size == NativeAdsSize.small ? 120.0 : 300.0;
 
     return SizedBox(
       width: double.infinity,

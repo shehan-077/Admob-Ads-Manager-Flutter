@@ -19,7 +19,7 @@ void main() async {
 
     await AdsManager.instance.init(
       ids: ids,
-      status: AdsStatus.testing,
+      status: AdsStatus.hybrid,
       loadingColor: Colors.black,
     );
 
@@ -60,7 +60,7 @@ class HomePage extends StatelessWidget {
       0,
       RewardedCallbacks(
         onShowed: () => debugPrint('Reward showed'),
-        onRewarded: () => debugPrint('User rewarded!'),
+        onRewarded: (reward) => debugPrint('User Rewarded'),
         onDismissed: () => debugPrint('Reward dismissed'),
         onError: (e) => debugPrint('Reward error: $e'),
         onFailedToShow: (e) => debugPrint('Reward failed to show: $e'),
@@ -85,7 +85,7 @@ class HomePage extends StatelessWidget {
       0,
       RewardedCallbacks(
         onShowed: () => debugPrint('Rewarded Interstitial showed'),
-        onRewarded: () => debugPrint('User rewarded from interstitial!'),
+        onRewarded: (reward) => debugPrint('User Rewarded'),
         onDismissed: () => debugPrint('Rewarded Interstitial dismissed'),
         onError: (e) => debugPrint('Rewarded Interstitial error: $e'),
         onFailedToShow: (e) =>
@@ -123,6 +123,7 @@ class HomePage extends StatelessWidget {
             const NativeAdsContainer(index: 0, size: NativeAdsSize.small),
             const SizedBox(height: 20),
             const NativeAdsContainer(index: 0, size: NativeAdsSize.medium),
+            const SizedBox(height: 20,),
           ],
         ),
       ),

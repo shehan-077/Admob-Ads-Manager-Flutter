@@ -14,7 +14,7 @@ class LoadingOverlay {
         return AbsorbPointer(
           absorbing: true,
           child: ColoredBox(
-            color: (_tintColor ?? Colors.black54).withOpacity(0.6),
+            color: (_tintColor ?? Colors.black54).withValues(alpha: 0.6),
             child: const Center(child: CircularProgressIndicator()),
           ),
         );
