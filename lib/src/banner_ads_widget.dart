@@ -43,13 +43,18 @@ class _BannerAdContainerState extends State<BannerAdContainer> {
 
     final width = MediaQuery.sizeOf(context).width.truncate();
 
-    final AdSize? adaptiveSize = await AdSize.getLargeAnchoredAdaptiveBannerAdSize(width);
+    final AnchoredAdaptiveBannerAdSize? adaptiveSize =
+        await AdSize.getAnchoredAdaptiveBannerAdSize(
+          MediaQuery.orientationOf(context),
+          width,
+        );
 
     if (!mounted) return;
 
     if (adaptiveSize == null) {
       debugPrint('Unable to get adaptive banner ad size');
       _isLoaded = false;
+      _isLoading = false;
       return;
     }
 
@@ -73,7 +78,6 @@ class _BannerAdContainerState extends State<BannerAdContainer> {
             _isLoaded = true;
             _isLoading = false;
           });
-
         },
         onAdFailedToLoad: (ad, error) {
           debugPrint('Banner failed to load: $error');
@@ -109,7 +113,8 @@ class _BannerAdContainerState extends State<BannerAdContainer> {
   @override
   Widget build(BuildContext context) {
     if (AdsManager.instance.isDisabled) return const SizedBox.shrink();
-    if (!_isLoaded || _banner == null || _adSize == null) return const SizedBox.shrink();
+    if (!_isLoaded || _banner == null || _adSize == null)
+      return const SizedBox.shrink();
 
     return SizedBox(
       width: _adSize!.width.toDouble(),

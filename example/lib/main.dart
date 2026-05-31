@@ -123,7 +123,7 @@ class HomePage extends StatelessWidget {
             const NativeAdsContainer(index: 0, size: NativeAdsSize.small),
             const SizedBox(height: 20),
             const NativeAdsContainer(index: 0, size: NativeAdsSize.medium),
-            const SizedBox(height: 20,),
+            const SizedBox(height: 20),
           ],
         ),
       ),

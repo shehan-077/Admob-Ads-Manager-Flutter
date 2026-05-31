@@ -26,7 +26,6 @@ class LoadingOverlay {
     if (_currentEntry != null) return;
 
     final overlay = Overlay.of(context, rootOverlay: true);
-    if (overlay == null) return;
 
     _currentEntry = _buildEntry();
     overlay.insert(_currentEntry!);

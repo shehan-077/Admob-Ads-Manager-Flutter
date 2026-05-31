@@ -35,7 +35,7 @@ dependencies:
     admob_ads_manager:
     git:
       url: https://github.com/shehan-077/Admob-Ads-Manager-Flutter.git
-      ref: 1.0.3
+      ref: 1.0.4
 ```
 
 ---
