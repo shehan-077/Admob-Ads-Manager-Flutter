@@ -1,17 +1,17 @@
 name: admob_ads_manager
-description: "This is a flutter plugin for google admob ads. This plugin is a wrapper for google mobile ads sdk."
-version: 1.0.4
-homepage:
+description: "Manager for Google AdMob ads on top of google_mobile_ads: UMP consent, preloaded full-screen ads, anchored, collapsible, inline adaptive and fixed banners, and native ads."
+version: 2.0.0
+homepage: https://github.com/shehan-077/Admob-Ads-Manager-Flutter
+repository: https://github.com/shehan-077/Admob-Ads-Manager-Flutter
 
 environment:
   sdk: ^3.10.1
-  flutter: ">=3.3.0"
+  flutter: ">=3.38.1"
 
 dependencies:
   flutter:
     sdk: flutter
-  plugin_platform_interface: ^2.1.8
-  google_mobile_ads: ^8.0.0
+  google_mobile_ads: ^9.1.0
 
 dev_dependencies:
   flutter_test:

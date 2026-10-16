@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 class AdMobIds {
   final String appId;
   final List<String> interstitialIds;
@@ -40,6 +42,22 @@ class AdMobIds {
       nativeIds: [nativeId],
       rewardedIntIds: [rewardedIntId],
     );
+  }
+
+  /// Picks the ids for the running platform, for apps whose Android and iOS
+  /// ad units differ. Throws [UnsupportedError] on other platforms.
+  factory AdMobIds.forPlatform({
+    required AdMobIds android,
+    required AdMobIds ios,
+  }) {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return android;
+      case TargetPlatform.iOS:
+        return ios;
+      default:
+        throw UnsupportedError('AdMob is only supported on Android and iOS.');
+    }
   }
 
   String getInterstitial(int index) =>

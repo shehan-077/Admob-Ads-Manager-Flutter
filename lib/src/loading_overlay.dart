@@ -22,13 +22,17 @@ class LoadingOverlay {
     );
   }
 
+  /// Shows the overlay. Never throws: if [context] is unmounted or has no
+  /// [Overlay] ancestor the ad simply loads without a spinner.
   void show(BuildContext context) {
-    if (_currentEntry != null) return;
+    if (_currentEntry != null || !context.mounted) return;
 
-    final overlay = Overlay.of(context, rootOverlay: true);
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
 
-    _currentEntry = _buildEntry();
-    overlay.insert(_currentEntry!);
+    final entry = _buildEntry();
+    _currentEntry = entry;
+    overlay.insert(entry);
   }
 
   void hide() {
@@ -38,8 +42,8 @@ class LoadingOverlay {
 
     try {
       entry.remove();
-    } catch (_) {
-      // ignore: already removed / route disposed
+    } catch (e) {
+      debugPrint('Loading overlay could not be removed: $e');
     }
   }
 
