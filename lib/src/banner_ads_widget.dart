@@ -144,7 +144,13 @@ class _BannerAdContainerState extends State<BannerAdContainer> {
 
   void _maybeStart(_Key key) {
     if (key == _requestedKey) return;
-    if (_manager.isDisabled || !_manager.adsAvailable.value) return;
+    if (_manager.isDisabled) return;
+    if (!_manager.adsAvailable.value) {
+      // Not ready (for example a failed consent update): offer the manager a
+      // chance to recover. The widget starts when availability changes.
+      _manager.requestRecovery();
+      return;
+    }
 
     _retireCurrent();
     _requestedKey = key;

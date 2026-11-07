@@ -1,3 +1,60 @@
+## 2.0.1
+
+Reliability patch: fewer lost ad opportunities, no change to ad frequency. The library still has no cooldown, minimum
+interval or frequency cap; display frequency stays the app's decision. Consent is never bypassed: nothing is requested
+or shown while `canRequestAds` is false.
+
+### Consent start-up
+* `show*` calls made while the managed consent flow is still running now wait up to `AdsManager.consentWait` (3 s)
+  instead of failing at once, so `await init()` followed by an immediate `showAppOpen()` no longer loses the
+  opportunity when consent finishes quickly. If it does not finish in time, or consent is denied, the handler gets
+  exactly one error. `init()` still returns before the flow completes.
+* The consent information update is bounded by `consentUpdateTimeout` (30 s); a hung update counts as failed and can
+  be recovered instead of keeping the manager in "consent in progress" forever.
+
+### Offline initialization recovery
+* After a failed consent update (for example an offline first launch) a later `show*`, a `preLoad`, a banner / native
+  widget that wants to load, or the app returning to the foreground retries the update, at most once per
+  `AdsManager.recoveryInterval` (30 s). `refreshAvailability()` still works at any time.
+* `preLoad` intent is kept (bounded, one entry per slot) while ads are unavailable and runs after recovery or after the
+  user's consent choices change; it is no longer discarded.
+* A `canRequestAds()` platform error no longer clears cached ads or hides visible banners / native ads; it is treated as
+  "unknown" and re-checked later.
+
+### Full-screen coordination
+* Loading and presenting are separate. The single-full-screen-ad rule is unchanged, but the lock is now taken only when
+  an ad is about to be presented, so a ready ad of another format is no longer refused because an unrelated ad is
+  still loading. A request whose load finishes while another ad is showing, or after another ad was presented, is
+  refused with an error (nothing is queued) and its loaded ad stays cached.
+* Two requests for the same slot cannot present one ad twice; overlapping loads keep the loading spinner until the
+  last one ends.
+* An exception while presenting an ad now disposes the ad, releases the lock and reports one error (previously the lock
+  could stay held).
+* An ad that never reports that it started showing, nor a dismissal or failure, is failed after
+  `AdsManager.showStartTimeout` (10 s) and the lock released. An ad that did start showing is never released by a timer.
+
+### Lifecycle
+* A request made while the lifecycle state is `hidden` or `paused` but moving towards `resumed` (the moments of a
+  normal resume) now waits up to `foregroundWait` (2 s, unchanged) like `inactive` does; moving away again, a timeout,
+  or `detached` still refuses. An ad is still only started while `resumed`. The error names the lifecycle state.
+
+### Banner / native
+* A banner or native widget built while ads are unavailable asks the manager to recover and loads as soon as ads
+  become available.
+* Failed banner / native loads are retried once when the app returns to the foreground (at most once per
+  `recoveryInterval`; switch off with `AdsManager.retryFailedAdsOnResume = false`). `retryFailedAds()` is unchanged.
+* The large anchored adaptive banner size introduced in 2.0.0 is kept.
+
+### Diagnostics
+* Debug builds log the life of each full-screen request (`op<N> <format>#<index>`): requested, cache hit / miss,
+  accepted or rejected with the reason, shown, impression, dismissed, plus load start / result and consent recovery.
+  Nothing is logged in release builds and no identifiers are logged.
+
+### Tests
+* 34 new regression tests (`test/impression_reliability_test.dart`) with fake SDKs: consent timing, denial and
+  timeouts, offline recovery, concurrent requests, load / present coordination, stale callbacks, lifecycle sequences,
+  resume retry. The existing tests were adapted where the intended behaviour changed (waiting instead of failing).
+
 ## 2.0.0
 
 ### Compatibility changes (read before upgrading)

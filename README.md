@@ -31,7 +31,7 @@ dependencies:
   admob_ads_manager:
     git:
       url: https://github.com/shehan-077/Admob-Ads-Manager-Flutter.git
-      ref: 2.0.0
+      ref: 2.0.1
 ```
 
 ```dart
@@ -180,6 +180,15 @@ Behaviour while the consent flow is still running:
 `canRequestAds()` is still consulted because consent from a previous session may allow requests; an error from
 `canRequestAds()` is treated as "not allowed".
 
+While the flow runs, `show*` calls wait up to `AdsManager.instance.consentWait` (3 s) and then continue if ads became
+available, or report one error. `preLoad` calls are remembered and run when ads become available.
+
+**Offline or failed update.** If the consent update fails and no earlier consent allows requests, ads stay off. The
+library retries the update (at most once per `recoveryInterval`, 30 s) when a later `show*`, `preLoad`, banner / native
+widget or the app returning to the foreground gives it an opportunity, then resumes the remembered preloads. Call
+`refreshAvailability()` yourself (for example from a connectivity listener) for an immediate attempt. Nothing is ever
+requested while `canRequestAds()` is false.
+
 `canRequestAds()` gates **every** request: `preLoad`, the automatic re-preload after a full-screen ad, app open,
 interstitial, rewarded, rewarded interstitial, banners and native ads. A cached full-screen ad is checked again right
 before it is shown. Duplicate initialization, duplicate forms and duplicate requests are prevented while asynchronous
@@ -301,8 +310,10 @@ Guarantees and behaviour:
 
 - **Foreground only.** A full-screen ad is only started while the app lifecycle is `resumed` (see
   [Android activity recreation](#android-activity-recreation)); otherwise the error callback fires.
-- **One at a time.** Only one full-screen ad (any format) may be loading-for-show or on screen. A second `show*` call
-  reports an error through its handler immediately.
+- **One at a time.** Only one full-screen ad (any format) is ever on screen. Loads for different slots may overlap, but
+  a `show*` call that finds another ad showing, or whose load finishes after another ad was presented, reports an error
+  through its handler; its loaded ad stays cached for a later call and nothing is queued. A presented ad that never
+  reports that it started showing is failed after `showStartTimeout` (10 s) and the lock released.
 - **Exactly one outcome.** Each call ends in one terminal callback: `onSuccess` / `onDismissed`, or an error callback.
   Duplicate native events are ignored. Synchronous and asynchronous `show()` failures are reported once and release the
   lock. If `context` is unmounted, the error callback fires and a loaded ad stays cached.
@@ -411,8 +422,10 @@ AdsManager.instance.retryFailedAds(unit: AdsUnit.native, index: 0);    // one sl
 
 Works with the const widgets, no controller or key needed. Only widgets whose last load failed and that currently hold
 no ad react. Widgets that already show an ad, are still loading, or cannot request ads (ads disabled, SDK not
-initialized, consent missing) ignore the call. There are no automatic retries and no refresh timers; call it from your
-own UI (for example a "Retry" button) or after connectivity returns.
+initialized, consent missing) ignore the call. There are no refresh timers. One retry happens
+automatically when the app returns to the foreground (at most once per `recoveryInterval`; disable with
+`AdsManager.instance.retryFailedAdsOnResume = false`); otherwise call it from your own UI (for example a "Retry"
+button) or after connectivity returns.
 
 ## Android activity recreation
 
@@ -433,7 +446,8 @@ itself survives, which is different from process death. Consequences seen on a d
 - After recreation the SDK may restore the ad that was on screen. The library will **not** start another full-screen ad
   on top of it: a request is only started while the app lifecycle state is `resumed`. State `inactive` (an ad or system
   dialog is covering the app) waits up to `AdsManager.instance.foregroundWait` (2 s) for `resumed` and is then refused
-  with an error through the handler; `paused`, `hidden` and `detached` are refused at once. Automatic ads (for example an
+  with an error through the handler; `hidden` and `paused` wait the same way but are refused as soon as the app moves
+  further away, and `detached` is refused at once. Automatic ads (for example an
   app-open ad on start-up) therefore cannot stack on a restored ad. Your handler's error branch must continue the app's
   normal flow.
 
@@ -461,8 +475,9 @@ the `UMP_*` defines no consent debug settings are used.
 
 ## Adopting it in an existing app
 
-- Waiting for the start-up consent flow before an automatic ad (for example an app-open ad on the splash screen): the
-  `show*` calls refuse while the consent form is open. Wait with a bound and continue without an ad if it is not ready:
+- Waiting for the start-up consent flow before an automatic ad (for example an app-open ad on the splash screen):
+  `show*` waits up to `consentWait` (3 s) and then refuses. A first-launch consent form can take longer, so wait
+  yourself with a bound you choose and continue without an ad if it is not ready:
 
   ```dart
   final ready = await AdsManager.instance.whenReady().timeout(
@@ -485,7 +500,7 @@ From 1.x:
   when using managed mode. Apps that did no consent handling now get the UMP flow; configure the privacy message in AdMob.
 - **`await init` timing.** In managed mode `init` returns before consent finishes. Code that assumed the SDK was
   initialized afterwards should use `whenReady()` or `adsAvailable`.
-- **`preLoad` no longer throws** and is deferred while the consent form is open; `show*` calls fail fast during that time
+- **`preLoad` no longer throws** and is deferred while the consent form is open; `show*` calls wait up to `consentWait` during that time (2.0.1; failed at once in 2.0.0)
   and when another full-screen ad is loading or showing.
 - **Error types.** Rewarded interstitial callbacks now receive the SDK error objects (as rewarded already did) instead of
   strings; `RequestHandler.onError` still receives strings. `RewardedCallbacks.onLoaded` / `onFailedToLoad` are now

@@ -12,11 +12,15 @@ class FakeInterstitial implements InterstitialAd {
   int shown = 0;
   int disposed = 0;
   Object? showError;
+  bool reportShowed = true;
 
   @override
   Future<void> show() async {
     shown++;
     if (showError != null) throw showError!;
+    if (reportShowed) {
+      fullScreenContentCallback?.onAdShowedFullScreenContent?.call(this);
+    }
   }
 
   @override
@@ -55,8 +59,15 @@ class FakeAppOpen implements AppOpenAd {
   int shown = 0;
   int disposed = 0;
 
+  bool reportShowed = true;
+
   @override
-  Future<void> show() async => shown++;
+  Future<void> show() async {
+    shown++;
+    if (reportShowed) {
+      fullScreenContentCallback?.onAdShowedFullScreenContent?.call(this);
+    }
+  }
 
   @override
   Future<void> dispose() async => disposed++;
@@ -106,6 +117,7 @@ class FakeRewardedInterstitial implements RewardedInterstitialAd {
   }) async {
     shown++;
     earn = onUserEarnedReward;
+    fullScreenContentCallback?.onAdShowedFullScreenContent?.call(this);
   }
 
   @override

@@ -502,14 +502,18 @@ void main() {
       );
 
       final rec = Recorder();
-      await manager.showAppOpen(ctx, 0, rec);
-      await manager.showInterstitial(ctx, 0, rec);
       var rewardErrors = 0;
-      await manager.showRewarded(
-        ctx,
-        0,
-        RewardedCallbacks(onError: (_) => rewardErrors++),
-      );
+      final shows = Future.wait([
+        manager.showAppOpen(ctx, 0, rec),
+        manager.showInterstitial(ctx, 0, rec),
+        manager.showRewarded(
+          ctx,
+          0,
+          RewardedCallbacks(onError: (_) => rewardErrors++),
+        ),
+      ]);
+      await tester.pump(const Duration(seconds: 3));
+      await shows;
       expect(rec.errors, hasLength(2));
       expect(rewardErrors, 1);
       expect(h.totalRequests, 0);
@@ -534,6 +538,7 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       final ad = FakeInterstitial();
       pending.onAdLoaded(ad);
+      await tester.pump(const Duration(seconds: 3));
       await show;
       expect(ad.shown, 0);
       expect(ad.disposed, 0);
@@ -756,7 +761,9 @@ void main() {
       await manager.init(ids: testIds, status: AdsStatus.enabled);
       final ctx = await pumpHost(tester);
       final rec = Recorder();
-      await manager.showInterstitial(ctx, 0, rec);
+      final show = manager.showInterstitial(ctx, 0, rec);
+      await tester.pump(manager.consentWait + const Duration(seconds: 1));
+      await show;
       expect(rec.errors, hasLength(1));
       expect(h.interstitialRequests, 0);
       h.formGate!.complete(null);

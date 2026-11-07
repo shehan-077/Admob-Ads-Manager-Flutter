@@ -23,7 +23,10 @@ class _LifecycleWatcher with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) => onChange(state);
 }
 
-class _FullScreenOp {}
+class _FullScreenOp {
+  final int id;
+  _FullScreenOp(this.id);
+}
 
 /// A request to retry failed banner / native loads. See
 /// [AdsManager.retryFailedAds].
@@ -62,6 +65,13 @@ class AdsManager {
   _FullScreenOp? _activeOp;
 
   int _epoch = 0;
+  int _opCounter = 0;
+  int _presentations = 0;
+  bool _eligible = false;
+  DateTime? _lastRecoveryAttempt;
+  DateTime? _lastResumeRetry;
+  _LifecycleWatcher? _resumeObserver;
+  final Set<(AdsUnit, int)> _loadingShows = {};
 
   AdsSdk _sdk = AdsSdk();
   AdPreloadCache _cache = AdPreloadCache();
@@ -86,6 +96,35 @@ class AdsManager {
   /// How long a full-screen request waits for the app to become `resumed` when
   /// the lifecycle state is `inactive` before it is refused.
   Duration foregroundWait = const Duration(seconds: 2);
+
+  /// How long a `show*` call waits for the start-up consent flow (managed
+  /// mode) before it is refused. Consent is never bypassed: no ad is requested
+  /// or shown until the SDK reports `canRequestAds`.
+  Duration consentWait = const Duration(seconds: 3);
+
+  /// Maximum time the consent information update may take. A hung update is
+  /// treated as a failed one, so recovery stays possible.
+  Duration consentUpdateTimeout = const Duration(seconds: 30);
+
+  /// Minimum spacing of automatic recovery attempts (a repeated consent update
+  /// after a failed one, and the retry of failed banner / native loads when
+  /// the app returns to the foreground). It limits consent and ad *requests*;
+  /// it never limits how often the host may show an ad.
+  Duration recoveryInterval = const Duration(seconds: 30);
+
+  /// How long a presented full-screen ad may take to report that it started
+  /// showing. If it never does (neither shown, dismissed nor failed), the
+  /// operation is failed and the lock released. An ad that did report showing
+  /// is never released by a timer.
+  Duration showStartTimeout = const Duration(seconds: 10);
+
+  /// Whether banner / native widgets whose load failed are retried once when
+  /// the app returns to the foreground (at most once per [recoveryInterval]).
+  bool retryFailedAdsOnResume = true;
+
+  /// Clock used for recovery spacing. Tests only.
+  @visibleForTesting
+  DateTime Function() clock = DateTime.now;
 
   /// SDK seam. Internal, used by the widgets and tests.
   @internal
@@ -175,7 +214,7 @@ class AdsManager {
   @visibleForTesting
   void resetForTesting({AdsSdk? sdk, AdPreloadCache? cache}) {
     _cache.clear();
-    _loadingOverlay.hide();
+    _loadingOverlay.hideAll();
     _loadingTasks.clear();
     _pendingPreloads.clear();
     _ids = null;
@@ -197,6 +236,25 @@ class AdsManager {
     loadTimeout = const Duration(seconds: 15);
     sdkInitTimeout = const Duration(seconds: 30);
     foregroundWait = const Duration(seconds: 2);
+    consentWait = const Duration(seconds: 3);
+    consentUpdateTimeout = const Duration(seconds: 30);
+    recoveryInterval = const Duration(seconds: 30);
+    showStartTimeout = const Duration(seconds: 10);
+    retryFailedAdsOnResume = true;
+    clock = DateTime.now;
+    _opCounter = 0;
+    _presentations = 0;
+    _eligible = false;
+    _lastRecoveryAttempt = null;
+    _lastResumeRetry = null;
+    _loadingShows.clear();
+    final observer = _resumeObserver;
+    _resumeObserver = null;
+    if (observer != null) {
+      try {
+        WidgetsBinding.instance.removeObserver(observer);
+      } catch (_) {}
+    }
     _sdk = sdk ?? AdsSdk();
     _cache = cache ?? AdPreloadCache();
   }
@@ -240,6 +298,8 @@ class AdsManager {
       return;
     }
 
+    _ensureResumeObserver();
+
     if (consentMode == AdsConsentMode.external) {
       await _refreshEligibility(rethrowInitError: true);
       return;
@@ -266,8 +326,11 @@ class AdsManager {
   Future<void> _runConsent(ConsentRequestParameters params) async {
     _consentRunning = true;
     _consentUpdateFailed = false;
+    _lastRecoveryAttempt = clock();
     try {
-      final updateError = await _sdk.requestConsentInfoUpdate(params);
+      final updateError = await _sdk
+          .requestConsentInfoUpdate(params)
+          .timeout(consentUpdateTimeout);
       if (updateError != null) {
         _consentUpdateFailed = true;
         debugPrint('UMP consent info update failed: ${updateError.message}');
@@ -298,15 +361,20 @@ class AdsManager {
       try {
         canRequest = await _sdk.canRequestAds();
       } catch (e) {
+        // Unknown is not permission, but it is also not a withdrawal: keep
+        // what is cached and shown, and let a later attempt re-check.
         debugPrint('canRequestAds() failed: $e');
-        canRequest = false;
+        if (seq != _refreshSeq) return;
+        _consentUpdateFailed = true;
+        return;
       }
     }
     if (seq != _refreshSeq) return;
+    _eligible = canRequest && !isDisabled;
 
     if (!canRequest || isDisabled) {
       _invalidateAds();
-      _pendingPreloads.clear();
+      if (isDisabled) _pendingPreloads.clear();
       _available.value = false;
     } else {
       try {
@@ -575,9 +643,17 @@ class AdsManager {
   Future<void> preLoad(AdsUnit unit, int index) async {
     if (!_adsDisabled &&
         _consentMode == AdsConsentMode.managed &&
-        _consentRunning &&
-        (unit != AdsUnit.banner && unit != AdsUnit.native)) {
-      _pendingPreloads.add((unit, index));
+        _consentFuture != null &&
+        (unit != AdsUnit.banner && unit != AdsUnit.native) &&
+        (_consentRunning || !_eligible)) {
+      // Remember the intent (bounded, one entry per slot); it runs once ads
+      // become available, e.g. after the form, or after recovery of a failed
+      // consent update.
+      if (_pendingPreloads.length < _maxPendingPreloads) {
+        _pendingPreloads.add((unit, index));
+      }
+      _dbg('preload ${unit.name}#$index deferred (consent not ready)');
+      _requestRecovery();
       return;
     }
     try {
@@ -585,6 +661,61 @@ class AdsManager {
     } catch (e) {
       debugPrint('Preload of ${unit.name}#$index failed: $e');
     }
+  }
+
+  static const int _maxPendingPreloads = 64;
+
+  void _dbg(String message) {
+    if (kDebugMode) debugPrint('AdsManager: $message');
+  }
+
+  /// Retries a failed consent information update, at most once per
+  /// [recoveryInterval], when a later request gives a safe opportunity (an ad
+  /// request, a widget wanting to load, the app returning to the foreground).
+  /// Does nothing unless the previous update failed and ads are unavailable.
+  void _requestRecovery() {
+    final params = _consentParams;
+    if (_consentMode != AdsConsentMode.managed ||
+        isDisabled ||
+        params == null ||
+        !_consentUpdateFailed ||
+        _consentRunning ||
+        _available.value) {
+      return;
+    }
+    final last = _lastRecoveryAttempt;
+    if (last != null && clock().difference(last) < recoveryInterval) return;
+    _dbg('recovering consent state');
+    _consentFuture = _runConsent(params);
+  }
+
+  /// Gives a banner / native widget that cannot load yet the chance to trigger
+  /// recovery. Internal.
+  @internal
+  void requestRecovery() => _requestRecovery();
+
+  void _ensureResumeObserver() {
+    if (_resumeObserver != null) return;
+    try {
+      final observer = _LifecycleWatcher(_onLifecycleChange);
+      WidgetsBinding.instance.addObserver(observer);
+      _resumeObserver = observer;
+    } catch (_) {
+      // No binding (plain Dart tests): nothing to observe.
+    }
+  }
+
+  void _onLifecycleChange(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || isDisabled || !isConfigured) {
+      return;
+    }
+    _requestRecovery();
+    if (!retryFailedAdsOnResume) return;
+    final now = clock();
+    final last = _lastResumeRetry;
+    if (last != null && now.difference(last) < recoveryInterval) return;
+    _lastResumeRetry = now;
+    retryFailedAds();
   }
 
   void _preloadQuietly(AdsUnit unit, int index) {
@@ -638,17 +769,21 @@ class AdsManager {
 
     final id = getAdUnitId(unit, index);
     final completer = Completer<void>();
+    _dbg('load ${unit.name}#$index started');
 
     void onLoaded(Ad ad) {
       if (_adsDisabled || epoch != _epoch) {
         disposeAdOnce(ad);
+        _dbg('load ${unit.name}#$index finished but obsolete');
       } else {
         _cache.set(unit, index, ad);
+        _dbg('load ${unit.name}#$index succeeded');
       }
       if (!completer.isCompleted) completer.complete();
     }
 
     void onFailed(LoadAdError error) {
+      _dbg('load ${unit.name}#$index failed: code ${error.code}');
       if (!completer.isCompleted) completer.completeError(error);
     }
 
@@ -699,6 +834,15 @@ class AdsManager {
     );
   }
 
+  /// Shared pipeline of the four full-screen formats.
+  ///
+  /// Loading and presenting are separate. Loads for different slots may run
+  /// at the same time, but at most one ad is ever presented: the presentation
+  /// lock is taken in one synchronous step together with the cached ad, so an
+  /// ad cannot be presented twice and a stale operation cannot release a newer
+  /// one. A request that finds another ad showing, or that was overtaken by
+  /// another presentation while it was loading, is refused with an error and
+  /// leaves its loaded ad cached; nothing is queued.
   Future<void> _showFullScreen<T extends Ad>({
     required BuildContext context,
     required AdsUnit unit,
@@ -709,16 +853,23 @@ class AdsManager {
     void Function(Object error)? onLoadFailed,
     required void Function(T ad, _FullScreenOp op) present,
   }) async {
+    final opId = ++_opCounter;
+    final tag = 'op$opId ${unit.name}#$index';
+    void reject(Object error) {
+      _dbg('$tag rejected: $error');
+      onError(error);
+    }
+
+    _dbg('$tag requested');
     if (_adsDisabled) {
       onDisabled();
       return;
     }
-    if (_consentMode == AdsConsentMode.managed && _consentRunning) {
-      onError('Ads are not available yet: the consent flow is in progress.');
-      return;
-    }
-    if (!await _awaitForeground()) {
-      onError('The app is not in the foreground: no full-screen ad is shown.');
+    _requestRecovery();
+    if (!await _awaitConsent()) {
+      reject(
+        'Ads are not available yet: the consent flow did not finish in time.',
+      );
       return;
     }
     if (_adsDisabled) {
@@ -726,90 +877,172 @@ class AdsManager {
       return;
     }
     if (_activeOp != null) {
-      onError('Another full-screen ad is already loading or showing.');
+      reject('Another full-screen ad is already loading or showing.');
       return;
     }
     if (!context.mounted) {
-      onError('Context is no longer mounted.');
+      reject('Context is no longer mounted.');
+      return;
+    }
+    if (!await _awaitForeground()) {
+      reject(_notForeground());
+      return;
+    }
+    if (_adsDisabled) {
+      onDisabled();
+      return;
+    }
+    if (_activeOp != null) {
+      reject('Another full-screen ad is already loading or showing.');
+      return;
+    }
+    if (!context.mounted) {
+      reject('Context is no longer mounted.');
+      return;
+    }
+    final slot = (unit, index);
+    if (_loadingShows.contains(slot)) {
+      reject('Another full-screen ad is already loading or showing.');
       return;
     }
 
-    final op = _FullScreenOp();
+    final presentationsAtStart = _presentations;
+    if (!await _requestsAllowed()) {
+      _invalidateAds();
+      reject('Ads cannot be requested: user consent not granted.');
+      return;
+    }
+    if (!context.mounted) {
+      reject('Context is no longer mounted.');
+      return;
+    }
+
+    if (_cache.contains(unit, index)) {
+      _dbg('$tag cache hit');
+    } else {
+      _dbg('$tag cache miss');
+      _loadingShows.add(slot);
+      _loadingOverlay.show(context);
+      try {
+        await _load(unit, index);
+      } catch (e) {
+        onLoadFailed?.call(e);
+        reject(e);
+        return;
+      } finally {
+        _loadingOverlay.hide();
+        _loadingShows.remove(slot);
+      }
+      if (_cache.contains(unit, index)) onLoaded?.call();
+    }
+
+    if (_adsDisabled) {
+      onDisabled();
+      return;
+    }
+    if (!context.mounted) {
+      reject('Context is no longer mounted.');
+      return;
+    }
+    if (!await _awaitForeground()) {
+      reject(_notForeground());
+      return;
+    }
+    if (_adsDisabled) {
+      onDisabled();
+      return;
+    }
+
+    // From here to `present` there is no await: the check, the hand-over of
+    // the cached ad and the lock are one atomic step.
+    if (_activeOp != null) {
+      reject('Another full-screen ad is already loading or showing.');
+      return;
+    }
+    if (_presentations != presentationsAtStart) {
+      reject(
+        'Another full-screen ad was shown while this one was loading; it '
+        'was not shown.',
+      );
+      return;
+    }
+    final ad = _cache.take<T>(unit, index);
+    if (ad == null) {
+      reject('Failed to load ${unit.name} ad');
+      return;
+    }
+
+    final op = _FullScreenOp(opId);
     _activeOp = op;
-    var handedOff = false;
+    _presentations++;
+    _dbg('$tag accepted');
     try {
-      if (!await _requestsAllowed()) {
-        _invalidateAds();
-        onError('Ads cannot be requested: user consent not granted.');
-        return;
-      }
-      if (!context.mounted) {
-        onError('Context is no longer mounted.');
-        return;
-      }
-
-      if (!_cache.contains(unit, index)) {
-        _loadingOverlay.show(context);
-        try {
-          await _load(unit, index);
-        } catch (e) {
-          onLoadFailed?.call(e);
-          onError(e);
-          return;
-        } finally {
-          _loadingOverlay.hide();
-        }
-        if (_cache.contains(unit, index)) onLoaded?.call();
-      }
-
-      if (_adsDisabled) {
-        onDisabled();
-        return;
-      }
-      if (!context.mounted) {
-        onError('Context is no longer mounted.');
-        return;
-      }
-      if (!await _awaitForeground()) {
-        onError(
-          'The app is not in the foreground: no full-screen ad is shown.',
-        );
-        return;
-      }
-      if (_adsDisabled) {
-        onDisabled();
-        return;
-      }
-
-      final ad = _cache.take<T>(unit, index);
-      if (ad == null) {
-        onError('Failed to load ${unit.name} ad');
-        return;
-      }
-
-      handedOff = true;
       present(ad, op);
-    } finally {
-      if (!handedOff) _releaseLock(op);
+    } catch (e) {
+      disposeAdOnce(ad);
+      _releaseLock(op);
+      reject(e);
     }
   }
 
+  /// Waits (bounded by [consentWait]) for the managed start-up consent flow.
+  /// Returns false if it is still running afterwards.
+  Future<bool> _awaitConsent() async {
+    if (_consentMode != AdsConsentMode.managed || !_consentRunning) return true;
+    try {
+      await consentReady.timeout(consentWait);
+    } on TimeoutException {
+      return false;
+    }
+    return !_consentRunning;
+  }
+
+  String _notForeground() {
+    String? state;
+    try {
+      state = WidgetsBinding.instance.lifecycleState?.name;
+    } catch (_) {}
+    return 'The app is not in the foreground: no full-screen ad is shown'
+        '${state == null ? '' : ' (lifecycle: $state)'}.';
+  }
+
+  static int _lifecycleRank(AppLifecycleState state) => switch (state) {
+    AppLifecycleState.detached => -1,
+    AppLifecycleState.paused => 0,
+    AppLifecycleState.hidden => 1,
+    AppLifecycleState.inactive => 2,
+    AppLifecycleState.resumed => 3,
+  };
+
   /// Whether the app is in the foreground. A full-screen ad is only started
-  /// while the lifecycle state is `resumed`. `inactive` (a system dialog, or
-  /// another activity such as an ad the SDK restored after the Android
-  /// Activity was recreated) is given [foregroundWait] to become `resumed`;
-  /// `paused`, `hidden` and `detached` are refused at once. This keeps an
-  /// automatic ad from stacking on top of an ad that is already on screen.
+  /// while the lifecycle state is `resumed`. A state on the way to `resumed`
+  /// (`inactive`, `hidden`, `paused`: a system dialog, an activity such as an
+  /// ad the SDK restored after the Android Activity was recreated, or the
+  /// moments of a resume before Flutter reports it) is given [foregroundWait]
+  /// to reach `resumed`. If the app moves further away instead, or the time
+  /// runs out, the request is refused; `detached` is refused at once. This
+  /// keeps an automatic ad from stacking on top of an ad that is already on
+  /// screen and never shows one while the app is in the background.
   Future<bool> _awaitForeground() async {
     final binding = WidgetsBinding.instance;
     final state = binding.lifecycleState;
     if (state == null || state == AppLifecycleState.resumed) return true;
-    if (state != AppLifecycleState.inactive) return false;
+    if (state == AppLifecycleState.detached) return false;
 
+    var level = _lifecycleRank(state);
     final result = Completer<bool>();
     final observer = _LifecycleWatcher((next) {
-      if (result.isCompleted || next == AppLifecycleState.inactive) return;
-      result.complete(next == AppLifecycleState.resumed);
+      if (result.isCompleted) return;
+      if (next == AppLifecycleState.resumed) {
+        result.complete(true);
+        return;
+      }
+      final rank = _lifecycleRank(next);
+      if (rank < level) {
+        result.complete(false);
+      } else {
+        level = rank;
+      }
     });
     binding.addObserver(observer);
     final timer = Timer(foregroundWait, () {
@@ -843,6 +1076,62 @@ class AdsManager {
     _preloadQuietly(unit, index);
   }
 
+  /// Wires the SDK callbacks of one presented ad and shows it. Exactly one of
+  /// [onDismissed] / [onFailed] runs, once. If the ad never reports that it
+  /// started showing (nor dismissal nor failure) within [showStartTimeout] it
+  /// is failed and the lock released; an ad that did report showing is only
+  /// released by its own dismissal or failure callback.
+  void _presentFullScreen<T extends Ad>({
+    required T ad,
+    required AdsUnit unit,
+    required int index,
+    required _FullScreenOp op,
+    required void Function(FullScreenContentCallback<T> callback) attach,
+    required Future<void> Function() show,
+    void Function()? onShowed,
+    required void Function() onDismissed,
+    required void Function(Object error) onFailed,
+  }) {
+    var done = false;
+    Timer? watchdog;
+    void finish(void Function() notify) {
+      if (done) return;
+      done = true;
+      watchdog?.cancel();
+      _release(ad, unit, index, op);
+      notify();
+    }
+
+    attach(
+      FullScreenContentCallback<T>(
+        onAdShowedFullScreenContent: (_) {
+          watchdog?.cancel();
+          if (done) return;
+          _dbg('op${op.id} showed');
+          onShowed?.call();
+        },
+        onAdImpression: (_) => _dbg('op${op.id} impression'),
+        onAdDismissedFullScreenContent: (_) {
+          _dbg('op${op.id} dismissed');
+          finish(onDismissed);
+        },
+        onAdFailedToShowFullScreenContent: (_, error) {
+          _dbg('op${op.id} failed to show: $error');
+          finish(() => onFailed(error));
+        },
+      ),
+    );
+    watchdog = Timer(showStartTimeout, () {
+      _dbg('op${op.id} never reported showing; releasing');
+      finish(
+        () => onFailed(
+          TimeoutException('The ad did not start showing', showStartTimeout),
+        ),
+      );
+    });
+    _runShow(show, (e) => finish(() => onFailed(e)));
+  }
+
   Future<void> showInterstitial(
     BuildContext context,
     int index,
@@ -854,22 +1143,16 @@ class AdsManager {
       index: index,
       onDisabled: handler.onSuccess,
       onError: (e) => handler.onError(e.toString()),
-      present: (ad, op) {
-        var done = false;
-        void finish(void Function() notify) {
-          if (done) return;
-          done = true;
-          _release(ad, AdsUnit.interstitial, index, op);
-          notify();
-        }
-
-        ad.fullScreenContentCallback = FullScreenContentCallback(
-          onAdDismissedFullScreenContent: (_) => finish(handler.onSuccess),
-          onAdFailedToShowFullScreenContent: (_, error) =>
-              finish(() => handler.onError(error.toString())),
-        );
-        _runShow(ad.show, (e) => finish(() => handler.onError(e.toString())));
-      },
+      present: (ad, op) => _presentFullScreen(
+        ad: ad,
+        unit: AdsUnit.interstitial,
+        index: index,
+        op: op,
+        attach: (cb) => ad.fullScreenContentCallback = cb,
+        show: ad.show,
+        onDismissed: handler.onSuccess,
+        onFailed: (e) => handler.onError(e.toString()),
+      ),
     );
   }
 
@@ -884,22 +1167,16 @@ class AdsManager {
       index: index,
       onDisabled: handler.onSuccess,
       onError: (e) => handler.onError(e.toString()),
-      present: (ad, op) {
-        var done = false;
-        void finish(void Function() notify) {
-          if (done) return;
-          done = true;
-          _release(ad, AdsUnit.appOpen, index, op);
-          notify();
-        }
-
-        ad.fullScreenContentCallback = FullScreenContentCallback(
-          onAdDismissedFullScreenContent: (_) => finish(handler.onSuccess),
-          onAdFailedToShowFullScreenContent: (_, error) =>
-              finish(() => handler.onError(error.toString())),
-        );
-        _runShow(ad.show, (e) => finish(() => handler.onError(e.toString())));
-      },
+      present: (ad, op) => _presentFullScreen(
+        ad: ad,
+        unit: AdsUnit.appOpen,
+        index: index,
+        op: op,
+        attach: (cb) => ad.fullScreenContentCallback = cb,
+        show: ad.show,
+        onDismissed: handler.onSuccess,
+        onFailed: (e) => handler.onError(e.toString()),
+      ),
     );
   }
 
@@ -919,31 +1196,23 @@ class AdsManager {
       onLoaded: () => handler.onLoaded?.call(),
       onLoadFailed: (e) => handler.onFailedToLoad?.call(e),
       present: (ad, op) {
-        var done = false;
         var rewarded = false;
-        void finish(void Function() notify) {
-          if (done) return;
-          done = true;
-          _release(ad, AdsUnit.rewarded, index, op);
-          notify();
-        }
-
-        ad.fullScreenContentCallback = FullScreenContentCallback(
-          onAdShowedFullScreenContent: (_) => handler.onShowed?.call(),
-          onAdDismissedFullScreenContent: (_) =>
-              finish(() => handler.onDismissed?.call()),
-          onAdFailedToShowFullScreenContent: (_, error) =>
-              finish(() => handler.onFailedToShow?.call(error)),
-        );
-        _runShow(
-          () => ad.show(
+        _presentFullScreen(
+          ad: ad,
+          unit: AdsUnit.rewarded,
+          index: index,
+          op: op,
+          attach: (cb) => ad.fullScreenContentCallback = cb,
+          show: () => ad.show(
             onUserEarnedReward: (_, reward) {
               if (rewarded) return;
               rewarded = true;
               handler.onRewarded?.call(reward);
             },
           ),
-          (e) => finish(() => handler.onFailedToShow?.call(e)),
+          onShowed: () => handler.onShowed?.call(),
+          onDismissed: () => handler.onDismissed?.call(),
+          onFailed: (e) => handler.onFailedToShow?.call(e),
         );
       },
     );
@@ -964,31 +1233,23 @@ class AdsManager {
       onLoaded: () => handler.onLoaded?.call(),
       onLoadFailed: (e) => handler.onFailedToLoad?.call(e),
       present: (ad, op) {
-        var done = false;
         var rewarded = false;
-        void finish(void Function() notify) {
-          if (done) return;
-          done = true;
-          _release(ad, AdsUnit.rewardedInt, index, op);
-          notify();
-        }
-
-        ad.fullScreenContentCallback = FullScreenContentCallback(
-          onAdShowedFullScreenContent: (_) => handler.onShowed?.call(),
-          onAdDismissedFullScreenContent: (_) =>
-              finish(() => handler.onDismissed?.call()),
-          onAdFailedToShowFullScreenContent: (_, error) =>
-              finish(() => handler.onFailedToShow?.call(error)),
-        );
-        _runShow(
-          () => ad.show(
+        _presentFullScreen(
+          ad: ad,
+          unit: AdsUnit.rewardedInt,
+          index: index,
+          op: op,
+          attach: (cb) => ad.fullScreenContentCallback = cb,
+          show: () => ad.show(
             onUserEarnedReward: (_, reward) {
               if (rewarded) return;
               rewarded = true;
               handler.onRewarded?.call(reward);
             },
           ),
-          (e) => finish(() => handler.onFailedToShow?.call(e)),
+          onShowed: () => handler.onShowed?.call(),
+          onDismissed: () => handler.onDismissed?.call(),
+          onFailed: (e) => handler.onFailedToShow?.call(e),
         );
       },
     );

@@ -138,7 +138,11 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
 
   void _start(_NativeKey key) {
     if (key == _requestedKey) return;
-    if (_manager.isDisabled || !_manager.adsAvailable.value) return;
+    if (_manager.isDisabled) return;
+    if (!_manager.adsAvailable.value) {
+      _manager.requestRecovery();
+      return;
+    }
     _retire();
     _requestedKey = key;
     final generation = _generation;

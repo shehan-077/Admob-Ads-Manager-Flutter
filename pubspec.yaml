@@ -1,6 +1,6 @@
 name: admob_ads_manager
 description: "Manager for Google AdMob ads on top of google_mobile_ads: UMP consent, preloaded full-screen ads, anchored, collapsible, inline adaptive and fixed banners, and native ads."
-version: 2.0.0
+version: 2.0.1
 homepage: https://github.com/shehan-077/Admob-Ads-Manager-Flutter
 repository: https://github.com/shehan-077/Admob-Ads-Manager-Flutter
 
