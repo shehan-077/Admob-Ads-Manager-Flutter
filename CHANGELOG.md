@@ -1,3 +1,14 @@
+## 2.1.0
+
+Additive release: observability and opt-in retry. No change to when ads are requested or shown by default.
+
+* `AdsManager.onAdEvent`: one `AdEvent` per load request, load result (with the SDK error code), show and paid event
+  (`onPaidEvent`: micros, currency, precision) for every format, including banner and native widgets.
+* `AdsManager.preLoadWithResult` returns an `AdLoadResult` (`loaded` / `failed` / `deferred` / `unavailable`) so a host
+  can keep an accurate ready flag and schedule its own retry. `preLoad` is unchanged.
+* `AdsManager.autoRetryBackoff` (default empty = off): capped automatic retry of failed banner / native loads, e.g.
+  `[2s, 4s, 8s]`; gives up after the last delay until `retryFailedAds()`.
+
 ## 2.0.1
 
 Reliability patch: fewer lost ad opportunities, no change to ad frequency. The library still has no cooldown, minimum

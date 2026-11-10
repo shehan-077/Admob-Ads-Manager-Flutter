@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
+import 'ad_events.dart';
 import 'admob_ids.dart';
 import 'ads_sdk.dart';
 import 'ads_status.dart';
@@ -121,6 +122,58 @@ class AdsManager {
   /// Whether banner / native widgets whose load failed are retried once when
   /// the app returns to the foreground (at most once per [recoveryInterval]).
   bool retryFailedAdsOnResume = true;
+
+  /// Receives an [AdEvent] for every load request, load result, show and paid
+  /// event of every format (for analytics). Exceptions it throws are caught.
+  void Function(AdEvent event)? onAdEvent;
+
+  /// Delays of the automatic retries of a failed banner / native load, e.g.
+  /// `[2s, 4s, 8s]`. Each failed slot is retried after the next delay and
+  /// gives up after the last one until [retryFailedAds] (or a new
+  /// configuration) restarts it. Empty (the default) disables automatic
+  /// retries.
+  List<Duration> autoRetryBackoff = const [];
+
+  /// Delivers [event] to [onAdEvent]. Internal.
+  @internal
+  void emit(AdEvent event) {
+    final callback = onAdEvent;
+    if (callback == null) return;
+    try {
+      callback(event);
+    } catch (e) {
+      debugPrint('onAdEvent handler failed: $e');
+    }
+  }
+
+  void _attachPaid(Ad ad, AdsUnit unit, int index) {
+    void paid(Ad _, double micros, PrecisionType precision, String currency) =>
+        emit(
+          AdEvent(
+            type: AdEventType.paid,
+            unit: unit,
+            index: index,
+            valueMicros: micros,
+            currencyCode: currency,
+            precision: precision.name,
+          ),
+        );
+    // Revenue reporting is best effort: it must never stop an ad from being
+    // cached (and fakes in tests do not implement the setter).
+    try {
+      if (ad is InterstitialAd) {
+        ad.onPaidEvent = paid;
+      } else if (ad is AppOpenAd) {
+        ad.onPaidEvent = paid;
+      } else if (ad is RewardedAd) {
+        ad.onPaidEvent = paid;
+      } else if (ad is RewardedInterstitialAd) {
+        ad.onPaidEvent = paid;
+      }
+    } catch (e) {
+      debugPrint('Could not attach the paid-event listener: $e');
+    }
+  }
 
   /// Clock used for recovery spacing. Tests only.
   @visibleForTesting
@@ -241,6 +294,8 @@ class AdsManager {
     recoveryInterval = const Duration(seconds: 30);
     showStartTimeout = const Duration(seconds: 10);
     retryFailedAdsOnResume = true;
+    onAdEvent = null;
+    autoRetryBackoff = const [];
     clock = DateTime.now;
     _opCounter = 0;
     _presentations = 0;
@@ -641,10 +696,19 @@ class AdsManager {
   /// yet granted): they are logged and the future completes normally, so
   /// `await preLoad(...)` during start-up cannot break the app.
   Future<void> preLoad(AdsUnit unit, int index) async {
-    if (!_adsDisabled &&
-        _consentMode == AdsConsentMode.managed &&
+    await preLoadWithResult(unit, index);
+  }
+
+  /// Like [preLoad], but reports how the load ended, so a caller can keep an
+  /// accurate "ready" flag and schedule its own retry. Never throws.
+  Future<AdLoadResult> preLoadWithResult(AdsUnit unit, int index) async {
+    if (_adsDisabled ||
+        unit == AdsUnit.banner ||
+        unit == AdsUnit.native) {
+      return const AdLoadResult(AdLoadOutcome.unavailable);
+    }
+    if (_consentMode == AdsConsentMode.managed &&
         _consentFuture != null &&
-        (unit != AdsUnit.banner && unit != AdsUnit.native) &&
         (_consentRunning || !_eligible)) {
       // Remember the intent (bounded, one entry per slot); it runs once ads
       // become available, e.g. after the form, or after recovery of a failed
@@ -654,13 +718,25 @@ class AdsManager {
       }
       _dbg('preload ${unit.name}#$index deferred (consent not ready)');
       _requestRecovery();
-      return;
+      return const AdLoadResult(AdLoadOutcome.deferred);
     }
     try {
       await _load(unit, index);
     } catch (e) {
       debugPrint('Preload of ${unit.name}#$index failed: $e');
+      return AdLoadResult(
+        AdLoadOutcome.failed,
+        errorCode: e is LoadAdError ? e.code : null,
+        message: e is LoadAdError ? e.message : e.toString(),
+      );
     }
+    if (_cache.contains(unit, index)) {
+      return const AdLoadResult(AdLoadOutcome.loaded);
+    }
+    return const AdLoadResult(
+      AdLoadOutcome.failed,
+      message: 'The load finished without a cached ad.',
+    );
   }
 
   static const int _maxPendingPreloads = 64;
@@ -770,8 +846,11 @@ class AdsManager {
     final id = getAdUnitId(unit, index);
     final completer = Completer<void>();
     _dbg('load ${unit.name}#$index started');
+    emit(AdEvent(type: AdEventType.request, unit: unit, index: index));
 
     void onLoaded(Ad ad) {
+      emit(AdEvent(type: AdEventType.loaded, unit: unit, index: index));
+      _attachPaid(ad, unit, index);
       if (_adsDisabled || epoch != _epoch) {
         disposeAdOnce(ad);
         _dbg('load ${unit.name}#$index finished but obsolete');
@@ -784,6 +863,15 @@ class AdsManager {
 
     void onFailed(LoadAdError error) {
       _dbg('load ${unit.name}#$index failed: code ${error.code}');
+      emit(
+        AdEvent(
+          type: AdEventType.failed,
+          unit: unit,
+          index: index,
+          errorCode: error.code,
+          errorMessage: error.message,
+        ),
+      );
       if (!completer.isCompleted) completer.completeError(error);
     }
 
@@ -1108,6 +1196,7 @@ class AdsManager {
           watchdog?.cancel();
           if (done) return;
           _dbg('op${op.id} showed');
+          emit(AdEvent(type: AdEventType.shown, unit: unit, index: index));
           onShowed?.call();
         },
         onAdImpression: (_) => _dbg('op${op.id} impression'),

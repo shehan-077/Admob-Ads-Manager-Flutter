@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
+import 'ad_events.dart';
 import 'ads_manager.dart';
 import 'ads_unit.dart';
 import 'banner_config.dart';
@@ -64,6 +65,26 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
   bool _loading = false;
   bool _failed = false;
 
+  Timer? _autoRetryTimer;
+  int _autoAttempt = 0;
+
+  void _cancelAutoRetry() {
+    _autoRetryTimer?.cancel();
+    _autoRetryTimer = null;
+  }
+
+  void _scheduleAutoRetry() {
+    final delays = _manager.autoRetryBackoff;
+    if (_autoAttempt >= delays.length) return;
+    final delay = delays[_autoAttempt++];
+    _cancelAutoRetry();
+    _autoRetryTimer = Timer(delay, () {
+      _autoRetryTimer = null;
+      if (!mounted) return;
+      _retryFailed();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -76,6 +97,7 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
     _manager.adsAvailable.removeListener(_onAvailabilityChanged);
     _manager.retryRequests.removeListener(_onRetryRequested);
     _generation++;
+    _cancelAutoRetry();
     final ad = _nativeAd;
     _nativeAd = null;
     if (ad != null) disposeAdOnce(ad);
@@ -98,15 +120,23 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
     if (!mounted || request == null) return;
     if (!request.matches(AdsUnit.native, widget.index)) return;
     if (!_failed || _loading) return;
+    _autoAttempt = 0; // an explicit retry restarts the automatic schedule
+    _retryFailed();
+  }
+
+  void _retryFailed() {
+    if (!_failed || _loading) return;
     if (_manager.isDisabled || !_manager.adsAvailable.value) return;
     final key = _pendingKey;
     if (key == null) return;
+    _cancelAutoRetry();
     _requestedKey = null;
     _start(key);
   }
 
   void _retire() {
     _generation++;
+    _cancelAutoRetry();
     _loading = false;
     _failed = false;
     final old = _nativeAd;
@@ -134,7 +164,20 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
     if (generation != _generation) return;
     _loading = false;
     _failed = failed;
+    if (failed) {
+      _scheduleAutoRetry();
+    } else {
+      _autoAttempt = 0;
+    }
   }
+
+  AdEvent _event(AdEventType type, {int? code, String? message}) => AdEvent(
+    type: type,
+    unit: AdsUnit.native,
+    index: widget.index,
+    errorCode: code,
+    errorMessage: message,
+  );
 
   void _start(_NativeKey key) {
     if (key == _requestedKey) return;
@@ -156,7 +199,19 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
       final ad = _manager.sdk.createNative(
         id,
         NativeAdListener(
+          onAdImpression: (_) => _manager.emit(_event(AdEventType.shown)),
+          onPaidEvent: (_, micros, precision, currency) => _manager.emit(
+            AdEvent(
+              type: AdEventType.paid,
+              unit: AdsUnit.native,
+              index: widget.index,
+              valueMicros: micros,
+              currencyCode: currency,
+              precision: precision.name,
+            ),
+          ),
           onAdLoaded: (ad) {
+            _manager.emit(_event(AdEventType.loaded));
             if (!mounted || generation != _generation) {
               disposeAdOnce(ad);
               return;
@@ -169,6 +224,13 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
           },
           onAdFailedToLoad: (ad, error) {
             debugPrint('Native failed: $error');
+            _manager.emit(
+              _event(
+                AdEventType.failed,
+                code: error.code,
+                message: error.message,
+              ),
+            );
             disposeAdOnce(ad);
             _finish(generation, failed: true);
           },
@@ -188,6 +250,7 @@ class _NativeAdsContainerState extends State<NativeAdsContainer> {
                 ),
         ),
       );
+      _manager.emit(_event(AdEventType.request));
       unawaited(
         ad.load().catchError((Object e) {
           debugPrint('Native request failed: $e');

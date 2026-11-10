@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
+import 'ad_events.dart';
 import 'ads_manager.dart';
 import 'ads_unit.dart';
 import 'banner_config.dart';
@@ -74,6 +75,26 @@ class _BannerAdContainerState extends State<BannerAdContainer> {
   bool _loading = false;
   bool _failed = false;
 
+  Timer? _autoRetryTimer;
+  int _autoAttempt = 0;
+
+  void _cancelAutoRetry() {
+    _autoRetryTimer?.cancel();
+    _autoRetryTimer = null;
+  }
+
+  void _scheduleAutoRetry() {
+    final delays = _manager.autoRetryBackoff;
+    if (_autoAttempt >= delays.length) return;
+    final delay = delays[_autoAttempt++];
+    _cancelAutoRetry();
+    _autoRetryTimer = Timer(delay, () {
+      _autoRetryTimer = null;
+      if (!mounted) return;
+      _retryFailed();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -86,6 +107,7 @@ class _BannerAdContainerState extends State<BannerAdContainer> {
     _manager.adsAvailable.removeListener(_onAvailabilityChanged);
     _manager.retryRequests.removeListener(_onRetryRequested);
     _generation++;
+    _cancelAutoRetry();
     final banner = _banner;
     _banner = null;
     if (banner != null) disposeAdOnce(banner);
@@ -108,15 +130,23 @@ class _BannerAdContainerState extends State<BannerAdContainer> {
     if (!mounted || request == null) return;
     if (!request.matches(AdsUnit.banner, widget.index)) return;
     if (!_failed || _loading) return;
+    _autoAttempt = 0; // an explicit retry restarts the automatic schedule
+    _retryFailed();
+  }
+
+  void _retryFailed() {
+    if (!_failed || _loading) return;
     if (_manager.isDisabled || !_manager.adsAvailable.value) return;
     final key = _pendingKey;
     if (key == null) return;
+    _cancelAutoRetry();
     _requestedKey = null;
     _maybeStart(key);
   }
 
   void _retireCurrent() {
     _generation++;
+    _cancelAutoRetry();
     _loading = false;
     _failed = false;
     final old = _banner;
@@ -176,7 +206,20 @@ class _BannerAdContainerState extends State<BannerAdContainer> {
     if (generation != _generation) return;
     _loading = false;
     _failed = failed;
+    if (failed) {
+      _scheduleAutoRetry();
+    } else {
+      _autoAttempt = 0;
+    }
   }
+
+  AdEvent _event(AdEventType type, {int? code, String? message}) => AdEvent(
+    type: type,
+    unit: AdsUnit.banner,
+    index: widget.index,
+    errorCode: code,
+    errorMessage: message,
+  );
 
   Future<void> _load(_Key key, int generation) async {
     _loading = true;
@@ -221,7 +264,19 @@ class _BannerAdContainerState extends State<BannerAdContainer> {
         adSize,
         request,
         BannerAdListener(
+          onAdImpression: (_) => _manager.emit(_event(AdEventType.shown)),
+          onPaidEvent: (_, micros, precision, currency) => _manager.emit(
+            AdEvent(
+              type: AdEventType.paid,
+              unit: AdsUnit.banner,
+              index: widget.index,
+              valueMicros: micros,
+              currencyCode: currency,
+              precision: precision.name,
+            ),
+          ),
           onAdLoaded: (ad) {
+            _manager.emit(_event(AdEventType.loaded));
             if (!mounted || generation != _generation) {
               disposeAdOnce(ad);
               return;
@@ -234,11 +289,19 @@ class _BannerAdContainerState extends State<BannerAdContainer> {
           },
           onAdFailedToLoad: (ad, error) {
             debugPrint('Banner failed to load: $error');
+            _manager.emit(
+              _event(
+                AdEventType.failed,
+                code: error.code,
+                message: error.message,
+              ),
+            );
             disposeAdOnce(ad);
             _finish(generation, failed: true);
           },
         ),
       );
+      _manager.emit(_event(AdEventType.request));
       try {
         await banner.load();
       } catch (e) {
